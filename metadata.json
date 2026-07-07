@@ -1,0 +1,6 @@
+{
+  "name": "المنصة الرقمية الموحدة لأهالي قرية ذي للجمال قدس",
+  "description": "منصة رقمية موحدة لإدارة التعداد السكاني، الخدمات والمرافق، التبرعات، وقنوات التواصل لأهالي قرية ذي للجمال قدس",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
