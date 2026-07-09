@@ -4,6 +4,27 @@
 @theme {
   --font-sans: "Cairo", "Tajawal", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Heritage palette */
+  --color-maroon-950: #3F1011;
+  --color-maroon-900: #4E1516;
+  --color-maroon-800: #5C1A1B;
+  --color-maroon-700: #7B2224;
+  --color-maroon-600: #8F2A2C;
+  --color-cream-50: #FDFBF7;
+  --color-cream-100: #F7EFE2;
+  --color-cream-200: #EFE3D0;
+  --color-cream-300: #E4D3B8;
+  --color-gold-500: #C9A227;
+  --color-gold-600: #B08D1E;
+  --color-ink-900: #211E1C;
+  --color-ink-700: #3A3531;
+  --color-ink-500: #6B635C;
+}
+
+@keyframes hv-fade-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 body {
