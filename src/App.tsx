@@ -686,7 +686,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFBF7] flex flex-col font-sans text-[#3E4C41] antialiased selection:bg-[#4A5D4E] selection:text-white pb-12" id="app-wrapper">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-700 antialiased selection:bg-blue-600 selection:text-white pb-12" id="app-wrapper">
       
       {/* Floating Contact/Communication Button (Always Visible Global Top-Left) */}
       <div className="fixed top-5 left-5 z-50">
@@ -701,63 +701,63 @@ export default function App() {
           <Phone className="w-5.5 h-5.5 group-hover:rotate-12 transition-transform duration-200" />
           
           {/* Tooltip text */}
-          <span className="absolute right-14 top-1/2 -translate-y-1/2 bg-white text-[#2D3A30] border border-[#E2DED0] text-[11px] font-bold py-1.5 px-3 rounded-xl shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+          <span className="absolute right-14 top-1/2 -translate-y-1/2 bg-white text-slate-900 font-extrabold border border-slate-200 text-[11px] font-bold py-1.5 px-3 rounded-xl shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
             اتصال وتواصل بالمسؤولين
           </span>
         </button>
       </div>
 
       {/* Top Main Navigation Header */}
-      <header className="bg-[#F4F1EA] text-[#2D3A30] shadow-sm relative sm:sticky top-0 z-40 transition-all border-b border-[#E2DED0]">
+      <header className="bg-stone-100 text-slate-900 font-extrabold shadow-sm relative sm:sticky top-0 z-40 transition-all border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-6 pb-4 sm:py-0 sm:h-20 gap-3">
             {/* Logo and App Title */}
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-[#4A5D4E] flex items-center justify-center text-[#FDFBF7] shadow-sm shrink-0">
+              <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold shadow-sm shrink-0">
                 <FileCheck2 className="w-6 h-6" />
               </div>
               <div>
-                <h1 className="font-extrabold text-sm sm:text-base md:text-lg tracking-tight leading-snug text-[#2D3A30]">
+                <h1 className="font-extrabold text-sm sm:text-base md:text-lg tracking-tight leading-snug text-slate-900 font-extrabold">
                   المنصة الرقمية لقرية ذي الجمال قدس
                 </h1>
               </div>
             </div>
 
             {/* Quick Metrics & Actions on Desktop & Mobile */}
-            <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 text-xs text-[#3E4C41]">
-              <div className="hidden md:flex items-center gap-2 border-r border-[#E2DED0] pr-4 text-[11px]">
-                <span className="w-2 h-2 rounded-full bg-[#4A5D4E] animate-pulse"></span>
-                <span className="font-semibold text-[#2D3A30]">النظام نشط ومؤمن</span>
+            <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 text-xs text-slate-700">
+              <div className="hidden md:flex items-center gap-2 border-r border-slate-200 pr-4 text-[11px]">
+                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+                <span className="font-semibold text-slate-900 font-extrabold">النظام نشط ومؤمن</span>
               </div>
               
               {/* Authenticated user indicator / Login buttons */}
               <div className="flex items-center gap-2">
                 {currentUser ? (
                   <div className="flex items-center gap-2">
-                    <div className="bg-[#4A5D4E]/10 border border-[#4A5D4E]/20 rounded-xl px-2.5 py-1 sm:px-3 sm:py-1.5 flex items-center gap-2">
-                      <ShieldCheck className="w-3.5 h-3.5 text-[#4A5D4E]" />
+                    <div className="bg-blue-600/10 border border-blue-600/20 rounded-xl px-2.5 py-1 sm:px-3 sm:py-1.5 flex items-center gap-2">
+                      <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
                       <div className="text-right">
-                        <div className="text-[9px] text-[#4A5D4E] font-extrabold leading-none">
+                        <div className="text-[9px] text-blue-600 font-extrabold leading-none">
                           {currentUser.role === 'super-admin' ? 'المشرف العام 🛡️' :
                            currentUser.role === 'admin' ? 'مدير شؤون القرية 🏛️' :
                            currentUser.role === 'delegate' ? 'مندوب المساهمات 🪙' :
                            currentUser.role === 'supervisor' ? 'مشرف التعداد 📋' :
                            currentUser.role === 'browser' ? 'متصفح 👥' : 'عضو البوابة 👤'}
                         </div>
-                        <div className="text-[10px] sm:text-xs text-[#2D3A30] font-bold max-w-[120px] truncate" title={currentUser.email}>
+                        <div className="text-[10px] sm:text-xs text-slate-900 font-extrabold font-bold max-w-[120px] truncate" title={currentUser.email}>
                           {currentUser.name ? `${currentUser.name} ${currentUser.surname || ''}` : currentUser.email}
                         </div>
                       </div>
                     </div>
                     <button
                       onClick={() => setIsChangePasswordOpen(true)}
-                      className="bg-amber-50 hover:bg-amber-100/80 text-amber-950 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-[10px] sm:text-xs font-extrabold transition-all border border-[#E2DED0]/80 cursor-pointer shadow-3xs flex items-center gap-1"
+                      className="bg-amber-50 hover:bg-amber-100/80 text-amber-950 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-[10px] sm:text-xs font-extrabold transition-all border border-slate-200/80 cursor-pointer shadow-3xs flex items-center gap-1"
                     >
                       تغيير كلمة المرور
                     </button>
                     <button
                       onClick={handleLogout}
-                      className="bg-[#FFF5EB] hover:bg-[#FFF5EB]/80 text-amber-900 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-[10px] sm:text-xs font-extrabold transition-all border border-[#E2DED0]/80 cursor-pointer shadow-3xs"
+                      className="bg-[#FFF5EB] hover:bg-[#FFF5EB]/80 text-amber-900 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-[10px] sm:text-xs font-extrabold transition-all border border-slate-200/80 cursor-pointer shadow-3xs"
                     >
                       خروج
                     </button>
@@ -766,7 +766,7 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setIsLoginOpen(true)}
-                      className="bg-[#4A5D4E] hover:bg-[#3E4C41] text-[#FDFBF7] px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs font-black transition-all border border-[#4A5D4E] cursor-pointer shadow-md hover:scale-102 flex items-center gap-1.5"
+                      className="bg-blue-600 hover:bg-blue-700 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs font-black transition-all border border-blue-600 cursor-pointer shadow-md hover:scale-102 flex items-center gap-1.5"
                     >
                       <ShieldCheck className="w-4 h-4 text-amber-400" />
                       تسجيل الدخول
@@ -781,7 +781,7 @@ export default function App() {
 
       {/* Primary Sub-Navigation Tabs (Unified Grid Layout / Focused Sub-Section Header) */}
       {!isUnapprovedDelegate ? (
-        <div className="bg-[#F4F1EA]/95 backdrop-blur-md border-b border-[#E2DED0] sticky top-0 sm:top-20 z-30 shadow-sm py-2" id="navigation-box">
+        <div className="bg-stone-100/95 backdrop-blur-md border-b border-slate-200 sticky top-0 sm:top-20 z-30 shadow-sm py-2" id="navigation-box">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-2">
           
           {activeTab === 'dashboard' ? (
@@ -790,8 +790,8 @@ export default function App() {
                 onClick={() => handleTabChange('dashboard')}
                 className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
                   activeTab === 'dashboard'
-                    ? 'bg-[#4A5D4E] text-[#FDFBF7] border-[#4A5D4E] shadow-md ring-2 ring-[#4A5D4E]/20 scale-102'
-                    : 'bg-white/80 text-[#5F6C61] border-[#D1CAB8] hover:text-[#2D3A30] hover:bg-[#E9F0E0]/40 hover:border-[#4A5D4E]/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
+                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
+                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
                 }`}
               >
                 <Home className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -802,8 +802,8 @@ export default function App() {
                 onClick={() => handleTabChange('families')}
                 className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
                   activeTab === 'families'
-                    ? 'bg-[#4A5D4E] text-[#FDFBF7] border-[#4A5D4E] shadow-md ring-2 ring-[#4A5D4E]/20 scale-102'
-                    : 'bg-white/80 text-[#5F6C61] border-[#D1CAB8] hover:text-[#2D3A30] hover:bg-[#E9F0E0]/40 hover:border-[#4A5D4E]/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
+                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
+                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
                 }`}
               >
                 <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -814,8 +814,8 @@ export default function App() {
                 onClick={() => handleTabChange('donations')}
                 className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
                   activeTab === 'donations'
-                    ? 'bg-[#4A5D4E] text-[#FDFBF7] border-[#4A5D4E] shadow-md ring-2 ring-[#4A5D4E]/20 scale-102'
-                    : 'bg-white/80 text-[#5F6C61] border-[#D1CAB8] hover:text-[#2D3A30] hover:bg-[#E9F0E0]/40 hover:border-[#4A5D4E]/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
+                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
+                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
                 }`}
               >
                 <Heart className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500 fill-red-500/10" />
@@ -826,8 +826,8 @@ export default function App() {
                 onClick={() => handleTabChange('services')}
                 className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
                   activeTab === 'services'
-                    ? 'bg-[#4A5D4E] text-[#FDFBF7] border-[#4A5D4E] shadow-md ring-2 ring-[#4A5D4E]/20 scale-102'
-                    : 'bg-white/80 text-[#5F6C61] border-[#D1CAB8] hover:text-[#2D3A30] hover:bg-[#E9F0E0]/40 hover:border-[#4A5D4E]/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
+                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
+                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
                 }`}
               >
                 <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -837,7 +837,7 @@ export default function App() {
               {/* Merged Section Button: الخريطة ودليل القرية */}
               <button
                 onClick={() => setIsExploreModalOpen(true)}
-                className="h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border bg-white/80 text-[#5F6C61] border-[#D1CAB8] hover:text-[#2D3A30] hover:bg-[#E9F0E0]/40 hover:border-[#4A5D4E]/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium"
+                className="h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium"
               >
                 <Compass className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 animate-pulse" />
                 الخريطة والدليل
@@ -847,8 +847,8 @@ export default function App() {
                 onClick={() => handleTabChange('contact')}
                 className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
                   activeTab === 'contact'
-                    ? 'bg-[#4A5D4E] text-[#FDFBF7] border-[#4A5D4E] shadow-md ring-2 ring-[#4A5D4E]/20 scale-102'
-                    : 'bg-white/80 text-[#5F6C61] border-[#D1CAB8] hover:text-[#2D3A30] hover:bg-[#E9F0E0]/40 hover:border-[#4A5D4E]/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
+                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
+                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
                 }`}
               >
                 <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-pink-500" />
@@ -858,7 +858,7 @@ export default function App() {
               {isSuperAdmin && (
                 <button
                   onClick={() => handleTabChange('admin-settings')}
-                  className="col-span-3 h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border bg-white/80 text-[#5F6C61] border-[#D1CAB8] hover:text-[#2D3A30] hover:bg-[#E9F0E0]/40 hover:border-[#4A5D4E]/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium"
+                  className="col-span-3 h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium"
                 >
                   <ShieldCheck className="w-4 h-4 text-amber-500 fill-amber-500/10 animate-pulse" />
                   إعدادات المدير العام للنظام
@@ -867,10 +867,10 @@ export default function App() {
             </nav>
           ) : (
             /* Sub-section View Header with Back to Home button */
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0 py-3 sm:py-2 bg-white border border-[#E2DED0] rounded-2xl px-4 shadow-sm" id="subview-header">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0 py-3 sm:py-2 bg-white border border-slate-200 rounded-2xl px-4 shadow-sm" id="subview-header">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse shrink-0"></span>
-                <h3 className="text-xs font-extrabold text-[#2D3A30] truncate">
+                <h3 className="text-xs font-extrabold text-slate-900 font-extrabold truncate">
                   القسم النشط: {
                     activeTab === 'families' ? 'التعداد السكاني والمساكن' :
                     activeTab === 'services' ? 'إدارة الخدمات والمرافق' :
@@ -884,7 +884,7 @@ export default function App() {
               </div>
               <button
                 onClick={() => handleTabChange('dashboard')}
-                className="w-full sm:w-auto justify-center bg-[#4A5D4E] hover:bg-[#3E4C41] text-[#FDFBF7] px-4 py-2 rounded-xl text-xs font-extrabold transition-all duration-150 flex items-center gap-1.5 cursor-pointer shadow-md border border-[#4A5D4E]"
+                className="w-full sm:w-auto justify-center bg-blue-600 hover:bg-blue-700 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold px-4 py-2 rounded-xl text-xs font-extrabold transition-all duration-150 flex items-center gap-1.5 cursor-pointer shadow-md border border-blue-600"
               >
                 <Home className="w-3.5 h-3.5" />
                 العودة للرئيسية
@@ -902,7 +902,7 @@ export default function App() {
                       setIsAddingFamily(true);
                       setIsAddingMemberOnly(false);
                     }}
-                    className="bg-[#4A5D4E] hover:bg-[#3E4C41] text-[#FDFBF7] px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-[#4A5D4E]"
+                    className="bg-blue-600 hover:bg-blue-700 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-blue-600"
                   >
                     <Plus className="w-3 h-3" />
                     تسجيل أسرة بالتعداد
@@ -912,7 +912,7 @@ export default function App() {
                       setIsAddingFamily(true);
                       setIsAddingMemberOnly(true);
                     }}
-                    className="bg-[#E9F0E0] hover:bg-[#DDE5B6] text-[#4A5D4E] px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-[#DDE5B6]"
+                    className="bg-blue-50 hover:bg-[#DDE5B6] text-blue-600 px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-blue-200"
                   >
                     <UserPlus className="w-3 h-3" />
                     إضافة فرد جديد
@@ -921,7 +921,7 @@ export default function App() {
                     onClick={() => {
                       setIsMovingMember(true);
                     }}
-                    className="bg-[#FFFDF9] hover:bg-[#F4F1EA] text-[#A98467] px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-[#E2DED0]"
+                    className="bg-slate-50 hover:bg-stone-100 text-[#A98467] px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-slate-200"
                   >
                     <Layers className="w-3 h-3 text-[#A98467]" />
                     نقل فرد
@@ -931,7 +931,7 @@ export default function App() {
               {activeTab === 'services' && (
                 <button
                   onClick={() => setIsAddingService(true)}
-                  className="bg-[#A98467] hover:bg-[#8F6C50] text-[#FDFBF7] px-3.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-[#A98467]"
+                  className="bg-[#A98467] hover:bg-[#8F6C50] text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold px-3.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-[#A98467]"
                 >
                   <Plus className="w-3 h-3" />
                   إضافة مرفق/مشروع خدمي
@@ -1033,20 +1033,20 @@ export default function App() {
               )}
 
               {activeTab === 'families' && (
-                <div className="space-y-6">
+                <div className="space-y-6 bg-indigo-50/40 border border-indigo-200 rounded-3xl p-4 sm:p-6 shadow-sm">
                   {/* Integrated Sub-Navigation for Census (التعداد السكاني) */}
-                  <div className="bg-[#F4F1EA] p-2 rounded-2xl border border-[#E2DED0] flex flex-wrap items-center justify-between gap-4">
+                  <div className="bg-stone-100 p-2 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#4A5D4E]"></span>
-                      <h3 className="text-xs font-bold text-[#2D3A30]">تصفح التعداد والتقارير الموحدة للقرية</h3>
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+                      <h3 className="text-xs font-bold text-slate-900 font-extrabold">تصفح التعداد والتقارير الموحدة للقرية</h3>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <button
                         onClick={() => setCensusSubView('register')}
                         className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                           censusSubView === 'register'
-                            ? 'bg-[#4A5D4E] text-[#FDFBF7] shadow-2xs'
-                            : 'bg-white/80 border border-[#E2DED0] text-[#7A8B7E] hover:text-[#2D3A30]'
+                            ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold shadow-2xs'
+                            : 'bg-white/80 border border-slate-200 text-slate-500 hover:text-slate-900 font-extrabold'
                         }`}
                       >
                         سجل الأسر والمواطنين
@@ -1055,8 +1055,8 @@ export default function App() {
                         onClick={() => setCensusSubView('google-sheets')}
                         className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                           censusSubView === 'google-sheets'
-                            ? 'bg-[#4A5D4E] text-[#FDFBF7] shadow-2xs'
-                            : 'bg-white/80 border border-[#E2DED0] text-[#7A8B7E] hover:text-[#2D3A30]'
+                            ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold shadow-2xs'
+                            : 'bg-white/80 border border-slate-200 text-slate-500 hover:text-slate-900 font-extrabold'
                         }`}
                       >
                         جدول Google Sheets المدمج
@@ -1065,8 +1065,8 @@ export default function App() {
                         onClick={() => setCensusSubView('reports')}
                         className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                           censusSubView === 'reports'
-                            ? 'bg-[#4A5D4E] text-[#FDFBF7] shadow-2xs'
-                            : 'bg-white/80 border border-[#E2DED0] text-[#7A8B7E] hover:text-[#2D3A30]'
+                            ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold shadow-2xs'
+                            : 'bg-white/80 border border-slate-200 text-slate-500 hover:text-slate-900 font-extrabold'
                         }`}
                       >
                         التقارير والمؤشرات الإحصائية
@@ -1105,14 +1105,16 @@ export default function App() {
               )}
 
               {activeTab === 'services' && (
-                <ServiceRegister
+                <div className="bg-amber-50/40 border border-amber-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+                  <ServiceRegister
                   services={services}
                   onAddService={() => setIsAddingService(true)}
                   onEditService={handleEditService}
                   onDeleteService={handleDeleteService}
                   onLocateOnMap={handleLocateServiceOnMap}
                   isAdmin={isAdmin}
-                />
+                  />
+                </div>
               )}
 
               {activeTab === 'map' && (
@@ -1136,13 +1138,15 @@ export default function App() {
               )}
 
               {activeTab === 'donations' && (
-                <Donations 
+                <div className="bg-teal-50/40 border border-teal-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+                  <Donations 
                   onBackToHome={() => setActiveTab('dashboard')} 
                   isAdmin={isAdmin} 
                   userRole={userRole as 'Admin' | 'Manager' | 'User'} 
                   currentUserEmail={currentUser?.email || ''} 
                   currentUser={currentUser}
-                />
+                  />
+                </div>
               )}
 
               {activeTab === 'contact' && (
@@ -1170,22 +1174,22 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-[#FDFBF7] rounded-3xl border border-[#E2DED0] shadow-xl max-w-lg w-full overflow-hidden p-6 relative"
+              className="bg-slate-50 rounded-3xl border border-slate-200 shadow-xl max-w-lg w-full overflow-hidden p-6 relative"
             >
               {/* Close Button */}
               <button
                 onClick={() => setIsExploreModalOpen(false)}
-                className="absolute left-4 top-4 p-1.5 rounded-xl text-[#7A8B7E] hover:text-[#2D3A30] hover:bg-[#F4F1EA] transition-all cursor-pointer border border-[#E2DED0]/50"
+                className="absolute left-4 top-4 p-1.5 rounded-xl text-slate-500 hover:text-slate-900 font-extrabold hover:bg-stone-100 transition-all cursor-pointer border border-slate-200/50"
               >
                 <X className="w-5 h-5" />
               </button>
 
               <div className="mb-6 space-y-2">
-                <h3 className="text-base sm:text-lg font-extrabold text-[#2D3A30] flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900 font-extrabold flex items-center gap-2">
                   <Compass className="w-5.5 h-5.5 text-blue-600" />
                   استكشاف معالم ودليل قرية ذي الجمال قدس
                 </h3>
-                <p className="text-xs text-[#7A8B7E] leading-relaxed">
+                <p className="text-xs text-slate-500 leading-relaxed">
                   يرجى تحديد الوجهة التي تود الانتقال إليها لتصفح بيانات القرية التفاعلية أو الاستعلام عن دليلها الخدمي الموحد.
                 </p>
               </div>
@@ -1197,16 +1201,16 @@ export default function App() {
                     setIsExploreModalOpen(false);
                     handleTabChange('map');
                   }}
-                  className="group bg-white hover:bg-[#E9F0E0] border border-[#E2DED0] hover:border-[#DDE5B6] rounded-2xl p-4 transition-all duration-200 text-right cursor-pointer flex items-start gap-3.5 shadow-3xs hover:shadow-xs"
+                  className="group bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-2xl p-4 transition-all duration-200 text-right cursor-pointer flex items-start gap-3.5 shadow-3xs hover:shadow-xs"
                 >
                   <div className="w-11 h-11 rounded-xl bg-blue-50 group-hover:bg-white text-blue-600 flex items-center justify-center shrink-0 shadow-3xs transition-colors">
                     <Map className="w-6 h-6" />
                   </div>
                   <div>
-                    <h4 className="text-xs sm:text-sm font-extrabold text-[#2D3A30] group-hover:text-[#4A5D4E]">
+                    <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 font-extrabold group-hover:text-blue-600">
                       الخريطة الجغرافية التفاعلية بالقرية
                     </h4>
-                    <p className="text-[11px] text-[#7A8B7E] mt-1 leading-relaxed">
+                    <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
                       عرض وتحديث المواقع الجغرافية لعائلات ومساكن القرية، بالإضافة للمرافق والمشاريع الخدمية مع تصفية دقيقة.
                     </p>
                   </div>
@@ -1218,26 +1222,26 @@ export default function App() {
                     setIsExploreModalOpen(false);
                     handleTabChange('directory');
                   }}
-                  className="group bg-white hover:bg-[#FFF5EB] border border-[#E2DED0] hover:border-[#F4F1EA] rounded-2xl p-4 transition-all duration-200 text-right cursor-pointer flex items-start gap-3.5 shadow-3xs hover:shadow-xs"
+                  className="group bg-white hover:bg-[#FFF5EB] border border-slate-200 hover:border-[#F4F1EA] rounded-2xl p-4 transition-all duration-200 text-right cursor-pointer flex items-start gap-3.5 shadow-3xs hover:shadow-xs"
                 >
                   <div className="w-11 h-11 rounded-xl bg-amber-50 group-hover:bg-white text-amber-600 flex items-center justify-center shrink-0 shadow-3xs transition-colors">
                     <Compass className="w-6 h-6 animate-spin" style={{ animationDuration: '6s' }} />
                   </div>
                   <div>
-                    <h4 className="text-xs sm:text-sm font-extrabold text-[#2D3A30] group-hover:text-amber-800">
+                    <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 font-extrabold group-hover:text-amber-800">
                       دليل القرية الخدمي والتنموي
                     </h4>
-                    <p className="text-[11px] text-[#7A8B7E] mt-1 leading-relaxed">
+                    <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
                       دليل منسق وشامل لجميع الخدمات المتوفرة (تعليمية، صحية، دينية، تنموية) للتواصل مع مسؤولي ومندوبي المرافق.
                     </p>
                   </div>
                 </button>
               </div>
 
-              <div className="mt-6 pt-4 border-t border-[#E2DED0] flex justify-end">
+              <div className="mt-6 pt-4 border-t border-slate-200 flex justify-end">
                 <button
                   onClick={() => setIsExploreModalOpen(false)}
-                  className="px-4 py-2 bg-[#F4F1EA] hover:bg-[#E2DED0] text-[#3E4C41] rounded-xl text-xs font-bold transition-all cursor-pointer border border-[#E2DED0]/50"
+                  className="px-4 py-2 bg-stone-100 hover:bg-[#E2DED0] text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer border border-slate-200/50"
                 >
                   إغلاق النافذة
                 </button>
@@ -1270,19 +1274,19 @@ export default function App() {
               initial={{ scale: 0.95, opacity: 0, y: 15 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              className="bg-white rounded-3xl border border-[#E2DED0] max-w-md w-full p-6 text-center space-y-4 shadow-2xl z-10 relative overflow-hidden"
+              className="bg-white rounded-3xl border border-slate-200 max-w-md w-full p-6 text-center space-y-4 shadow-2xl z-10 relative overflow-hidden"
             >
               <div className="bg-emerald-600 h-1.5 absolute top-0 left-0 right-0" />
               <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-3xl font-black">
                 ✓
               </div>
-              <h3 className="text-base font-extrabold text-[#2D3A30]">تم إرسال طلبك بنجاح</h3>
-              <p className="text-xs text-[#5F6C61] leading-relaxed">
+              <h3 className="text-base font-extrabold text-slate-900 font-extrabold">تم إرسال طلبك بنجاح</h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
                 {registerSuccessMessage}
               </p>
               <button
                 onClick={() => setRegisterSuccessMessage(null)}
-                className="w-full bg-[#4A5D4E] hover:bg-[#3E4C41] text-[#FDFBF7] py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-3xs"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-3xs"
               >
                 حسناً، فهمت
               </button>
