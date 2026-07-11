@@ -1,6 +1,7 @@
 import LandingNavbar from './landing/LandingNavbar';
 import LandingHero from './landing/LandingHero';
 import LandingAbout from './landing/LandingAbout';
+import LandingStatistics from './landing/LandingStatistics';
 import LandingNews from './landing/LandingNews';
 import LandingGallery from './landing/LandingGallery';
 import LandingFooter from './landing/LandingFooter';
@@ -12,6 +13,7 @@ export default function LandingPage({ onEnter }: { onEnter: () => void }) {
       <main>
         <LandingHero onEnter={onEnter} />
         <LandingAbout />
+        <LandingStatistics />
         <LandingNews />
         <LandingGallery />
       </main>

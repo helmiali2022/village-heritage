@@ -9,6 +9,7 @@ interface NavLink {
 const NAV_LINKS: NavLink[] = [
   { label: 'الرئيسية', id: 'home' },
   { label: 'عن القرية', id: 'about' },
+  { label: 'التعداد', id: 'statistics' },
   { label: 'أخبارنا', id: 'news' },
   { label: 'المعرض', id: 'gallery' },
   { label: 'اتصل بنا', id: 'contact' },
