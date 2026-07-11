@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Family, Member, HousingType, IncomeRangeType, SupportStatusType } from '../types';
 import { X, Save, AlertTriangle, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import SearchableResidenceSelect from './SearchableResidenceSelect';
 
 interface EditFamilyModalProps {
   family: Family;
@@ -51,7 +52,23 @@ export default function EditFamilyModal({
 
   // Members editing states
   const [showMembersSection, setShowMembersSection] = useState(false);
-  const [members, setMembers] = useState<Member[]>(family.members || []);
+  const [members, setMembers] = useState<Member[]>(() => {
+    const rawMembers = family.members || [];
+    return rawMembers.map(m => {
+      let edu = m.education;
+      if ((edu as any) === 'تحت سن الدراسة') {
+        edu = 'دون سن الدراسة';
+      }
+      return {
+        ...m,
+        education: edu || 'غير محدد',
+        age: m.birthDate ? calculateAge(m.birthDate) : (m.age || 0)
+      };
+    });
+  });
+
+  const [isSavedLocally, setIsSavedLocally] = useState<boolean>(false);
+  const [isSynced, setIsSynced] = useState<boolean>(false);
 
   const canEditMembers = currentUser && ['super-admin', 'admin', 'delegate'].includes(currentUser.role);
 
@@ -62,6 +79,10 @@ export default function EditFamilyModal({
       [field]: value
     };
 
+    if (field === 'name') {
+      updatedMember.name = value;
+    }
+
     if (field === 'relationship') {
       const rel = value as string;
       if (['ابن', 'زوج', 'أب', 'أخ'].includes(rel)) {
@@ -71,8 +92,22 @@ export default function EditFamilyModal({
       }
     }
 
+    if (field === 'education') {
+      const edu = value as string;
+      if (edu === 'دون سن الدراسة') {
+        updatedMember.occupation = 'لا يوجد';
+      }
+    }
+
+    // Force occupation to 'لا يوجد' if education is 'دون سن الدراسة'
+    if (updatedMember.education === 'دون سن الدراسة') {
+      updatedMember.occupation = 'لا يوجد';
+    }
+
     updatedMembers[index] = updatedMember;
     setMembers(updatedMembers);
+    setIsSavedLocally(false);
+    setIsSynced(false);
   };
 
   const handleAddMember = () => {
@@ -81,18 +116,23 @@ export default function EditFamilyModal({
       name: '',
       relationship: 'ابن',
       gender: 'ذكر',
-      age: 18,
+      age: 0,
+      birthDate: '',
       education: 'غير محدد',
       occupation: 'لا يوجد',
       healthStatus: 'سليم',
     };
     setMembers([...members, newMember]);
+    setIsSavedLocally(false);
+    setIsSynced(false);
   };
 
   const handleRemoveMember = (index: number) => {
     if (window.confirm('هل أنت متأكد من حذف هذا الفرد من قائمة أفراد الأسرة؟')) {
       const updatedMembers = members.filter((_, i) => i !== index);
       setMembers(updatedMembers);
+      setIsSavedLocally(false);
+      setIsSynced(false);
     }
   };
 
@@ -105,6 +145,8 @@ export default function EditFamilyModal({
       age: calculatedAge
     };
     setMembers(updatedMembers);
+    setIsSavedLocally(false);
+    setIsSynced(false);
   };
 
   // Initialize surname selection
@@ -135,22 +177,33 @@ export default function EditFamilyModal({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const compileFamilyData = (): Family | null => {
     const finalFamilyName = isNewSurname ? customSurname.trim() : selectedSurname.trim();
 
     if (!finalFamilyName) {
       alert('يرجى اختيار أو كتابة اللقب الموحد للعائلة');
-      return;
+      return null;
     }
 
     if (!breadwinnerName.trim()) {
       alert('يرجى كتابة اسم رب الأسرة');
-      return;
+      return null;
     }
 
-    const updatedFamily: Family = {
+    // Validate members' names
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i];
+      if (!m.name.trim()) {
+        alert(`يرجى كتابة الاسم الأول للتابع رقم ${i + 1}`);
+        return null;
+      }
+      if (m.name.trim().includes(' ') || m.name.includes(' ') || m.name.trim().split(/\s+/).length > 1) {
+        alert(`خطأ في التابع رقم ${i + 1}: الاسم يجب أن يتكون من كلمة واحدة فقط بدون مسافات! ("${m.name}")`);
+        return null;
+      }
+    }
+
+    return {
       ...family,
       familyName: finalFamilyName,
       breadwinnerName: breadwinnerName.trim(),
@@ -164,11 +217,19 @@ export default function EditFamilyModal({
       notes: notes.trim(),
       members: members.map(m => ({
         ...m,
-        name: m.name.split(' ')[0] // Strictly enforce First Name only for dependent on save
+        name: m.name.trim()
       })),
     };
+  };
 
-    onSave(updatedFamily);
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const updatedFamily = compileFamilyData();
+    if (!updatedFamily) return;
+
+    setIsSavedLocally(true);
+    setIsSynced(false);
+    alert('✓ تم حفظ التعديلات محلياً بنجاح! لتوثيق التغييرات وإغلاق هذه النافذة، يرجى الضغط على زر "🔄 ترحيل ومزامنة البيانات مع Google Sheets" لضمان التزامن السحابي.');
   };
 
   return (
@@ -185,7 +246,15 @@ export default function EditFamilyModal({
             </div>
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={() => {
+              if (isSavedLocally && !isSynced) {
+                if (!window.confirm('لديك تعديلات تم حفظها محلياً ولكن لم يتم ترحيلها سحابياً بعد. هل أنت متأكد من الخروج وإلغاء التغييرات؟')) {
+                  return;
+                }
+              }
+              onClose();
+            }}
             className="p-1.5 hover:bg-white/10 rounded-lg text-white/80 hover:text-white transition-all cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -451,12 +520,23 @@ export default function EditFamilyModal({
                                   <input
                                     type="text"
                                     value={member.name}
-                                    onChange={(e) => handleMemberFieldChange(idx, 'name', e.target.value)}
+                                    onChange={(e) => {
+                                      handleMemberFieldChange(idx, 'name', e.target.value);
+                                    }}
                                     disabled={!canEditMembers}
                                     placeholder="الاسم الأول فقط"
-                                    className="w-full px-2 py-1 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#2D3A30] font-semibold outline-none focus:ring-1 focus:ring-[#4A5D4E] focus:border-[#4A5D4E] disabled:bg-[#F4F1EA]/40 disabled:text-gray-500"
+                                    className={`w-full px-2 py-1 rounded-lg border text-xs font-semibold outline-none disabled:bg-[#F4F1EA]/40 disabled:text-gray-500 ${
+                                      member.name.trim() && (member.name.includes(' ') || member.name.trim().split(/\s+/).length > 1)
+                                        ? 'border-red-500 bg-red-50 text-red-900 focus:ring-1 focus:ring-red-400'
+                                        : 'border-[#E2DED0] bg-white text-[#2D3A30] focus:ring-1 focus:ring-[#4A5D4E] focus:border-[#4A5D4E]'
+                                    }`}
                                     required
                                   />
+                                  {member.name.trim() && (member.name.includes(' ') || member.name.trim().split(/\s+/).length > 1) && (
+                                    <span className="text-[9px] text-red-600 font-bold block mt-0.5">
+                                      ⚠️ اسم واحد فقط!
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="p-2">
                                   <select
@@ -522,7 +602,7 @@ export default function EditFamilyModal({
                                 <select
                                   value={member.occupation || 'لا يوجد'}
                                   onChange={(e) => handleMemberFieldChange(idx, 'occupation', e.target.value)}
-                                  disabled={!canEditMembers}
+                                  disabled={!canEditMembers || member.education === 'دون سن الدراسة'}
                                   className="w-full px-2 py-1 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#2D3A30] font-semibold outline-none focus:ring-1 focus:ring-[#4A5D4E] disabled:bg-[#F4F1EA]/40 disabled:text-gray-500"
                                 >
                                   <option value="طالب">طالب</option>
@@ -590,12 +670,23 @@ export default function EditFamilyModal({
                                 <input
                                   type="text"
                                   value={member.name}
-                                  onChange={(e) => handleMemberFieldChange(idx, 'name', e.target.value)}
+                                  onChange={(e) => {
+                                    handleMemberFieldChange(idx, 'name', e.target.value);
+                                  }}
                                   disabled={!canEditMembers}
                                   placeholder="الاسم الأول فقط"
-                                  className="w-full px-2.5 py-1.5 border border-[#E2DED0] rounded-lg text-xs bg-white text-[#2D3A30] outline-none disabled:bg-[#F4F1EA]/30"
+                                  className={`w-full px-2.5 py-1.5 border rounded-lg text-xs outline-none disabled:bg-[#F4F1EA]/30 ${
+                                    member.name.trim() && (member.name.includes(' ') || member.name.trim().split(/\s+/).length > 1)
+                                      ? 'border-red-500 bg-red-50 text-red-900 focus:ring-1 focus:ring-red-400'
+                                      : 'border-[#E2DED0] bg-white text-[#2D3A30] focus:ring-1 focus:ring-[#4A5D4E]'
+                                  }`}
                                   required
                                 />
+                                {member.name.trim() && (member.name.includes(' ') || member.name.trim().split(/\s+/).length > 1) && (
+                                  <span className="text-[9px] text-red-600 font-bold block mt-0.5">
+                                    ⚠️ اسم واحد فقط بدون مسافات!
+                                  </span>
+                                )}
                               </div>
                             
                             <div>
@@ -669,7 +760,7 @@ export default function EditFamilyModal({
                               <select
                                 value={member.occupation || 'لا يوجد'}
                                 onChange={(e) => handleMemberFieldChange(idx, 'occupation', e.target.value)}
-                                disabled={!canEditMembers}
+                                disabled={!canEditMembers || member.education === 'دون سن الدراسة'}
                                 className="w-full px-2 py-1.5 border border-[#E2DED0] rounded-lg text-xs bg-white text-[#2D3A30] outline-none"
                               >
                                 <option value="طالب">طالب</option>
@@ -724,81 +815,91 @@ export default function EditFamilyModal({
             </p>
           </div>
 
-          {/* Buttons */}
-          <div className="flex justify-between items-center pt-2">
-            <button
-              type="button"
-              onClick={async () => {
-                alert('جاري المزامنة مع Google Sheets...');
-                const payload = {
-                  action: 'editFamily',
-                  familyName: isNewSurname ? customSurname.trim() : selectedSurname.trim(),
-                  breadwinnerName: breadwinnerName.trim(),
-                  phone: phone.trim(),
-                  neighborhood: neighborhood,
-                  residence: residence,
-                  housingType: housingType,
-                  monthlyIncome: monthlyIncome,
-                  supportStatus: supportStatus,
-                  notes: notes,
-                  members: members.map(m => ({
-                    ...m,
-                    name: m.name.split(' ')[0] // Ensure strictly FIRST NAME ONLY for dependent
-                  }))
-                };
-                try {
-                  await fetch('/api/submit-to-sheets', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                  });
-                  alert('تم ترحيل البيانات بنجاح!');
-                } catch (e) {
-                  alert('حدث خطأ أثناء المزامنة');
-                }
-              }}
-              className="text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              🔄 ترحيل ومزامنة البيانات مع Google Sheets
-            </button>
-            <div className="flex gap-3">
+          {/* Status Alert and Action Buttons */}
+          <div className="space-y-3 pt-2">
+            {isSavedLocally && !isSynced && (
+              <div className="bg-emerald-50 border-2 border-emerald-500/30 p-4 rounded-2xl flex items-start gap-3 animate-pulse">
+                <span className="text-xl">💡</span>
+                <div className="space-y-1">
+                  <h5 className="text-xs font-black text-emerald-800">تم تثبيت التعديلات محلياً بنجاح!</h5>
+                  <p className="text-[11px] text-emerald-700 leading-relaxed font-bold">
+                    المرحلة النهائية: يرجى الضغط على زر <span className="bg-emerald-600 text-white px-1.5 py-0.5 rounded text-[9px]">🔄 ترحيل ومزامنة البيانات مع Google Sheets</span> لترحيل كافة التغييرات سحابياً. سيتم إغلاق هذه النافذة تلقائياً فور نجاح المزامنة.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center">
               <button
                 type="button"
-                onClick={onClose}
-                className="px-4 py-2 rounded-xl border border-[#E2DED0] text-xs font-semibold text-[#3E4C41] hover:bg-[#F4F1EA] transition-all cursor-pointer bg-white"
-              >
-                إلغاء التغييرات
-              </button>
-              <button
-                type="submit"
-                onClick={() => {
+                onClick={async () => {
+                  const updatedFamily = compileFamilyData();
+                  if (!updatedFamily) return;
+
+                  alert('جاري المزامنة مع Google Sheets...');
                   const payload = {
                     action: 'editFamily',
-                    familyName: isNewSurname ? customSurname.trim() : selectedSurname.trim(),
-                    breadwinnerName: breadwinnerName.trim(),
-                    phone: phone.trim(),
-                    neighborhood: neighborhood,
-                    residence: residence,
-                    housingType: housingType,
-                    monthlyIncome: monthlyIncome,
-                    supportStatus: supportStatus,
-                    notes: notes,
-                    members: members.map(m => ({
-                      ...m,
-                      name: m.name.split(' ')[0] // Ensure strictly FIRST NAME ONLY for dependent
-                    }))
+                    familyName: updatedFamily.familyName,
+                    breadwinnerName: updatedFamily.breadwinnerName,
+                    phone: updatedFamily.phone,
+                    neighborhood: updatedFamily.neighborhood,
+                    residence: updatedFamily.residence,
+                    housingType: updatedFamily.housingType,
+                    monthlyIncome: updatedFamily.monthlyIncome,
+                    supportStatus: updatedFamily.supportStatus,
+                    notes: updatedFamily.notes,
+                    members: updatedFamily.members
                   };
-                  fetch('/api/submit-to-sheets', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                  }).catch(() => {});
+
+                  try {
+                    const res = await fetch('/api/submit-to-sheets', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload)
+                    });
+                    
+                    if (!res.ok) throw new Error('فشلت المزامنة السحابية من الخادم');
+                    
+                    setIsSynced(true);
+                    alert('تم ترحيل البيانات ومزامنتها بنجاح مع Google Sheets!');
+                    
+                    // Call parent onSave which updates the parent state and closes the modal!
+                    onSave(updatedFamily);
+                  } catch (e) {
+                    alert('حدث خطأ أثناء المزامنة: ' + (e instanceof Error ? e.message : ''));
+                  }
                 }}
-                className="px-5 py-2 rounded-xl bg-[#4A5D4E] hover:bg-[#3E4C41] text-[#FDFBF7] text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+                className={`text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border ${
+                  isSavedLocally
+                    ? 'text-white bg-emerald-600 hover:bg-emerald-700 border-emerald-600 ring-2 ring-emerald-500/20'
+                    : 'text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200'
+                }`}
               >
-                <Save className="w-4 h-4" />
-                حفظ التعديلات السريعة
+                🔄 ترحيل ومزامنة البيانات مع Google Sheets
               </button>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isSavedLocally && !isSynced) {
+                      if (!window.confirm('لديك تعديلات تم حفظها محلياً ولكن لم يتم ترحيلها سحابياً بعد. هل أنت متأكد من الخروج وإلغاء التغييرات؟')) {
+                        return;
+                      }
+                    }
+                    onClose();
+                  }}
+                  className="px-4 py-2 rounded-xl border border-[#E2DED0] text-xs font-semibold text-[#3E4C41] hover:bg-[#F4F1EA] transition-all cursor-pointer bg-white"
+                >
+                  إلغاء التغييرات
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#4A5D4E] hover:bg-[#3E4C41] text-[#FDFBF7] text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  حفظ التعديلات السريعة
+                </button>
+              </div>
             </div>
           </div>
         </form>

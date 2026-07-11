@@ -15,10 +15,12 @@ import LoginModal from './components/LoginModal';
 import SuperAdminSettings from './components/SuperAdminSettings';
 import ChangePasswordModal from './components/ChangePasswordModal';
 import GoogleSheetsData from './components/GoogleSheetsData';
+import GoogleCalendarEvents from './components/GoogleCalendarEvents';
 import EditFamilyModal from './components/EditFamilyModal';
 import MoveMemberModal from './components/MoveMemberModal';
 import UnapprovedDelegatePanel from './components/UnapprovedDelegatePanel';
 import FirstLoginUpdate from './components/FirstLoginUpdate';
+import { getFamilyDiff, getMemberDiff, sendAuditLog } from './utils/auditLogger';
 import { 
   Building2, 
   Home, 
@@ -39,11 +41,12 @@ import {
   Heart,
   MessageSquare,
   Coins,
-  Layers
+  Layers,
+  Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type TabType = 'dashboard' | 'families' | 'services' | 'map' | 'reports' | 'donations' | 'contact' | 'directory' | 'admin-settings';
+type TabType = 'dashboard' | 'families' | 'services' | 'map' | 'reports' | 'donations' | 'contact' | 'directory' | 'admin-settings' | 'calendar';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<any | null>(() => {
@@ -57,6 +60,7 @@ export default function App() {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [registerSuccessMessage, setRegisterSuccessMessage] = useState<string | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Sync user profile in real-time with the database
   useEffect(() => {
@@ -394,9 +398,41 @@ export default function App() {
     if (!isAdmin) return;
     if (editingFamily || families.some(f => f.id === savedFamily.id)) {
       // Edit mode or updating existing family
+      const oldFam = families.find(f => f.id === savedFamily.id);
+      if (oldFam) {
+        const diffText = getFamilyDiff(oldFam, savedFamily);
+        if (diffText !== 'لم تتغير أي حقول أساسية في العائلة نفسها') {
+          sendAuditLog(currentUser, diffText, 'تعديل', 'التعداد');
+        } else {
+          // Check for member updates
+          if (oldFam.members.length !== savedFamily.members.length) {
+            if (savedFamily.members.length > oldFam.members.length) {
+              const addedMem = savedFamily.members.find(nm => !oldFam.members.some(om => om.id === nm.id));
+              if (addedMem) {
+                sendAuditLog(currentUser, `تم إضافة تابع جديد [${addedMem.name}] (صلة القرابة: ${addedMem.relationship}) لعائلة [عائلة ${savedFamily.familyName}]`, 'إضافة', 'التعداد');
+              }
+            } else {
+              const deletedMem = oldFam.members.find(om => !savedFamily.members.some(nm => nm.id === om.id));
+              if (deletedMem) {
+                sendAuditLog(currentUser, `تم حذف التابع [${deletedMem.name}] (صلة القرابة: ${deletedMem.relationship}) من عائلة [عائلة ${savedFamily.familyName}]`, 'حذف', 'التعداد');
+              }
+            }
+          } else {
+            // Check if individual member was updated
+            oldFam.members.forEach(oldMem => {
+              const newMem = savedFamily.members.find(m => m.id === oldMem.id);
+              if (newMem && JSON.stringify(oldMem) !== JSON.stringify(newMem)) {
+                const memDiff = getMemberDiff(oldMem, newMem);
+                sendAuditLog(currentUser, `تعديل تابع في عائلة [عائلة ${savedFamily.familyName}]: ${memDiff}`, 'تعديل', 'التعداد');
+              }
+            });
+          }
+        }
+      }
       setFamilies(families.map(f => f.id === savedFamily.id ? savedFamily : f));
     } else {
       // Create mode
+      sendAuditLog(currentUser, `تم إضافة عائلة جديدة لرب الأسرة [${savedFamily.breadwinnerName}] باسم [عائلة ${savedFamily.familyName}] في محلة [${savedFamily.neighborhood}]`, 'إضافة', 'التعداد');
       setFamilies([savedFamily, ...families]);
     }
     setIsAddingFamily(false);
@@ -526,6 +562,14 @@ export default function App() {
         })
       }).catch(() => {});
 
+      // Record audit log
+      sendAuditLog(
+        currentUser,
+        `حركة سكان - تأسيس أسرة جديدة: تم فصل الفرد [${moveData.memberName}] وتأسيس أسرة جديدة باسم [عائلة ${moveData.familyName}] بمحلة [${moveData.neighborhood}] مع تابعين (${moveData.selectedDependents?.length || 0} أفراد) بتاريخ ${moveData.transferDate}. مبررات وملاحظات: ${moveData.notes || 'لا يوجد'}.`,
+        'نقل',
+        'التعداد'
+      );
+
     } else if (moveData.moveType === 'marriage_outside') {
       if (moveData.selectedMemberId) {
         const origFamily = families.find(f => (f.members || []).some(m => m.id === moveData.selectedMemberId));
@@ -554,6 +598,14 @@ export default function App() {
         })
       }).catch(() => {});
 
+      // Record audit log
+      sendAuditLog(
+        currentUser,
+        `حركة سكان - زواج خارج القرية: تم توثيق مغادرة الفرد [${moveData.memberName}] من [عائلة ${moveData.familyName}] بسبب زواج خارج القرية بتاريخ ${moveData.transferDate}. مبررات وملاحظات: ${moveData.notes || 'لا يوجد'}.`,
+        'نقل',
+        'التعداد'
+      );
+
     } else if (moveData.moveType === 'out_governorate') {
       if (moveData.selectedMemberId) {
         const origFamily = families.find(f => (f.members || []).some(m => m.id === moveData.selectedMemberId));
@@ -581,6 +633,14 @@ export default function App() {
           }
         })
       }).catch(() => {});
+
+      // Record audit log
+      sendAuditLog(
+        currentUser,
+        `حركة سكان - انتقال لمحافظة أخرى: تم توثيق انتقال الفرد [${moveData.memberName}] من [عائلة ${moveData.familyName}] لمحافظة [${moveData.targetGovernorate || 'أخرى'}] بتاريخ ${moveData.transferDate}. مبررات وملاحظات: ${moveData.notes || 'لا يوجد'}.`,
+        'نقل',
+        'التعداد'
+      );
     }
 
     setFamilies(updatedFamilies);
@@ -596,7 +656,16 @@ export default function App() {
   const handleDeleteFamily = (id: string) => {
     if (!isAdmin) return;
     if (window.confirm('هل أنت متأكد من حذف سجل هذه العائلة بالكامل؟ لا يمكن التراجع عن هذا الإجراء.')) {
+      const targetFamily = families.find(f => f.id === id);
       setFamilies(families.filter(f => f.id !== id));
+      if (targetFamily) {
+        sendAuditLog(
+          currentUser,
+          `تم حذف سجل العائلة بالكامل باسم [عائلة ${targetFamily.familyName}]، رب الأسرة [${targetFamily.breadwinnerName}] مع كافة التابعين المرتبطين بها (${targetFamily.members ? targetFamily.members.length : 0} أفراد).`,
+          'حذف',
+          'التعداد'
+        );
+      }
     }
   };
 
@@ -685,192 +754,250 @@ export default function App() {
     }, 100);
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-700 antialiased selection:bg-blue-600 selection:text-white pb-12" id="app-wrapper">
-      
-      {/* Floating Contact/Communication Button (Always Visible Global Top-Left) */}
-      <div className="fixed top-5 left-5 z-50">
-        <button
-          onClick={() => handleTabChange('contact')}
-          title="اتصال وتواصل"
-          className="relative group w-12 h-12 sm:w-13 sm:h-13 rounded-full bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-700 hover:to-rose-600 text-white flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 cursor-pointer"
-        >
-          {/* Pulsating shadow ring */}
-          <span className="absolute inset-0 rounded-full bg-pink-500/30 animate-ping opacity-75"></span>
-          
-          <Phone className="w-5.5 h-5.5 group-hover:rotate-12 transition-transform duration-200" />
-          
-          {/* Tooltip text */}
-          <span className="absolute right-14 top-1/2 -translate-y-1/2 bg-white text-slate-900 font-extrabold border border-slate-200 text-[11px] font-bold py-1.5 px-3 rounded-xl shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-            اتصال وتواصل بالمسؤولين
-          </span>
-        </button>
-      </div>
-
-      {/* Top Main Navigation Header */}
-      <header className="bg-stone-100 text-slate-900 font-extrabold shadow-sm relative sm:sticky top-0 z-40 transition-all border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-6 pb-4 sm:py-0 sm:h-20 gap-3">
-            {/* Logo and App Title */}
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold shadow-sm shrink-0">
-                <FileCheck2 className="w-6 h-6" />
-              </div>
-              <div>
-                <h1 className="font-extrabold text-sm sm:text-base md:text-lg tracking-tight leading-snug text-slate-900 font-extrabold">
-                  المنصة الرقمية لقرية ذي الجمال قدس
-                </h1>
-              </div>
+  // Render sidebar contents helper
+  const renderSidebarUserSection = () => {
+    if (currentUser) {
+      return (
+        <div className="bg-[#1e293b] border border-slate-800 rounded-2xl p-4 mb-4 space-y-3 shadow-inner">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white shrink-0">
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
             </div>
-
-            {/* Quick Metrics & Actions on Desktop & Mobile */}
-            <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 text-xs text-slate-700">
-              <div className="hidden md:flex items-center gap-2 border-r border-slate-200 pr-4 text-[11px]">
-                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
-                <span className="font-semibold text-slate-900 font-extrabold">النظام نشط ومؤمن</span>
+            <div className="text-right overflow-hidden">
+              <div className="text-[10px] text-sky-400 font-extrabold leading-none mb-1">
+                {currentUser.role === 'super-admin' ? 'المشرف العام 🛡️' :
+                 currentUser.role === 'admin' ? 'مدير شؤون القرية 🏛️' :
+                 currentUser.role === 'delegate' ? 'مندوب المساهمات 🪙' :
+                 currentUser.role === 'supervisor' ? 'مشرف التعداد 📋' :
+                 currentUser.role === 'browser' ? 'متصفح 👥' : 'عضو البوابة 👤'}
               </div>
-              
-              {/* Authenticated user indicator / Login buttons */}
-              <div className="flex items-center gap-2">
-                {currentUser ? (
-                  <div className="flex items-center gap-2">
-                    <div className="bg-blue-600/10 border border-blue-600/20 rounded-xl px-2.5 py-1 sm:px-3 sm:py-1.5 flex items-center gap-2">
-                      <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-                      <div className="text-right">
-                        <div className="text-[9px] text-blue-600 font-extrabold leading-none">
-                          {currentUser.role === 'super-admin' ? 'المشرف العام 🛡️' :
-                           currentUser.role === 'admin' ? 'مدير شؤون القرية 🏛️' :
-                           currentUser.role === 'delegate' ? 'مندوب المساهمات 🪙' :
-                           currentUser.role === 'supervisor' ? 'مشرف التعداد 📋' :
-                           currentUser.role === 'browser' ? 'متصفح 👥' : 'عضو البوابة 👤'}
-                        </div>
-                        <div className="text-[10px] sm:text-xs text-slate-900 font-extrabold font-bold max-w-[120px] truncate" title={currentUser.email}>
-                          {currentUser.name ? `${currentUser.name} ${currentUser.surname || ''}` : currentUser.email}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setIsChangePasswordOpen(true)}
-                      className="bg-amber-50 hover:bg-amber-100/80 text-amber-950 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-[10px] sm:text-xs font-extrabold transition-all border border-slate-200/80 cursor-pointer shadow-3xs flex items-center gap-1"
-                    >
-                      تغيير كلمة المرور
-                    </button>
-                    <button
-                      onClick={handleLogout}
-                      className="bg-[#FFF5EB] hover:bg-[#FFF5EB]/80 text-amber-900 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-[10px] sm:text-xs font-extrabold transition-all border border-slate-200/80 cursor-pointer shadow-3xs"
-                    >
-                      خروج
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setIsLoginOpen(true)}
-                      className="bg-blue-600 hover:bg-blue-700 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs font-black transition-all border border-blue-600 cursor-pointer shadow-md hover:scale-102 flex items-center gap-1.5"
-                    >
-                      <ShieldCheck className="w-4 h-4 text-amber-400" />
-                      تسجيل الدخول
-                    </button>
-                  </div>
-                )}
+              <div className="text-xs text-white font-bold truncate" title={currentUser.email}>
+                {currentUser.name ? `${currentUser.name} ${currentUser.surname || ''}` : currentUser.email}
               </div>
             </div>
           </div>
+          <div className="grid grid-cols-1 gap-2 pt-2 border-t border-slate-800">
+            <button
+              onClick={() => {
+                setIsChangePasswordOpen(true);
+                setIsMobileMenuOpen(false);
+              }}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              تغيير كلمة المرور
+            </button>
+            <button
+              onClick={() => {
+                handleLogout();
+                setIsMobileMenuOpen(false);
+              }}
+              className="w-full bg-rose-950/40 hover:bg-rose-950/60 text-rose-300 py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all border border-rose-900/30 cursor-pointer"
+            >
+              خروج
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <button
+        onClick={() => {
+          setIsLoginOpen(true);
+          setIsMobileMenuOpen(false);
+        }}
+        className="w-full bg-blue-600 hover:bg-blue-700 text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.5)] font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 mb-4 cursor-pointer shadow-md active:scale-98"
+      >
+        <ShieldCheck className="w-4 h-4 text-amber-400" />
+        تسجيل الدخول
+      </button>
+    );
+  };
+
+  const renderSidebarLinks = () => {
+    const links = [
+      { id: 'dashboard', label: 'الرئيسية واللوحة الإحصائية', icon: <Home className="w-4 h-4 text-sky-400" />, emoji: '📊' },
+      { id: 'families', label: 'التعداد السكاني وسجل العائلات', icon: <Users className="w-4 h-4 text-indigo-400" />, emoji: '👥' },
+      { id: 'services', label: 'الخدمات والمشاريع والمرافق', icon: <Building2 className="w-4 h-4 text-amber-400" />, emoji: '🛠️' },
+      { id: 'donations', label: 'المساهمات والتبرعات الخيرية', icon: <Heart className="w-4 h-4 text-teal-400 fill-teal-500/10" />, emoji: '💖' },
+      { id: 'map', label: 'الخريطة الجغرافية التفاعلية', icon: <MapPin className="w-4 h-4 text-emerald-400" />, emoji: '📍' },
+      { id: 'directory', label: 'دليل القرية الخدمي والتنموي', icon: <Compass className="w-4 h-4 text-cyan-400 animate-pulse" />, emoji: '📖' },
+      { id: 'calendar', label: 'التقويم وفعاليات القرية السحابية', icon: <Calendar className="w-4 h-4 text-emerald-400" />, emoji: '📅' },
+      { id: 'contact', label: 'صندوق المقترحات والتواصل', icon: <MessageSquare className="w-4 h-4 text-pink-400" />, emoji: '📞' },
+    ];
+
+    return (
+      <nav className="flex flex-col gap-2">
+        {links.map((link) => {
+          const isActive = activeTab === link.id;
+          return (
+            <button
+              key={link.id}
+              onClick={() => {
+                handleTabChange(link.id as TabType);
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 text-right text-xs sm:text-[13px] font-bold border-r-4 cursor-pointer ${
+                isActive
+                  ? 'bg-[#1e293b] text-[#38bdf8] border-blue-500 shadow-sm font-black'
+                  : 'text-slate-300 hover:bg-[#1e293b] hover:text-[#38bdf8] border-transparent font-medium'
+              }`}
+            >
+              <span className="shrink-0">{link.icon}</span>
+              <span className="flex-1 truncate">{link.label}</span>
+              <span className="text-sm">{link.emoji}</span>
+            </button>
+          );
+        })}
+
+        {isSuperAdmin && (
+          <button
+            onClick={() => {
+              handleTabChange('admin-settings');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 text-right text-xs sm:text-[13px] font-bold border-r-4 cursor-pointer ${
+              activeTab === 'admin-settings'
+                ? 'bg-[#1e293b] text-amber-400 border-amber-500 shadow-sm font-black'
+                : 'text-slate-300 hover:bg-[#1e293b] hover:text-amber-400 border-transparent font-medium'
+            }`}
+          >
+            <span className="shrink-0"><Settings className="w-4 h-4 text-amber-500" /></span>
+            <span className="flex-1 truncate">إعدادات المدير العام للنظام</span>
+            <span className="text-sm">🛡️</span>
+          </button>
+        )}
+      </nav>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-700 antialiased selection:bg-blue-600 selection:text-white" id="app-wrapper" dir="rtl">
+      
+      {/* Floating Contact/Communication Button (Always Visible Global Top-Left on Desktop or Floating) */}
+      <div className="fixed bottom-5 right-5 z-50 md:hidden">
+        <button
+          onClick={() => handleTabChange('contact')}
+          title="اتصال وتواصل"
+          className="relative group w-12 h-12 rounded-full bg-gradient-to-r from-pink-600 to-rose-500 text-white flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer"
+        >
+          <span className="absolute inset-0 rounded-full bg-pink-500/30 animate-ping opacity-75"></span>
+          <Phone className="w-5.5 h-5.5" />
+        </button>
+      </div>
+
+      {/* Desktop Persistent Sidebar Layout */}
+      <aside className="w-72 bg-[#0f172a] text-white fixed h-full right-0 top-0 p-6 flex flex-col gap-4 shadow-xl z-40 hidden md:flex border-l border-slate-800 overflow-y-auto">
+        <div className="text-base sm:text-lg font-black mb-6 border-b border-slate-800 pb-4 text-center text-[#38bdf8] flex items-center justify-center gap-2">
+          <FileCheck2 className="w-6 h-6 text-[#38bdf8]" />
+          <span>ذي الجمال قدس</span>
+        </div>
+        
+        {/* User state profile container */}
+        {renderSidebarUserSection()}
+
+        {/* Sidebar Nav Links */}
+        {renderSidebarLinks()}
+        
+        <div className="mt-auto pt-6 border-t border-slate-800/80 text-center text-[10px] text-slate-500 font-bold leading-relaxed">
+          <div>المنصة الرقمية للقرية مخصصة ومحمية</div>
+          <div>تعداد شامل • تبرعات • مرافق</div>
+          <div className="mt-1 font-mono text-slate-600">© 2026</div>
+        </div>
+      </aside>
+
+      {/* Mobile Top Header Navigation */}
+      <header className="bg-stone-100 text-slate-900 shadow-sm sticky top-0 z-30 transition-all border-b border-slate-200 md:hidden py-3 px-4 flex items-center justify-between w-full">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="p-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all active:scale-95 cursor-pointer"
+            title="افتح القائمة"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold shrink-0 shadow-sm">
+              <FileCheck2 className="w-4 h-4 text-white" />
+            </div>
+            <h1 className="font-extrabold text-xs sm:text-sm text-slate-900">
+              بوابة ذي الجمال قدس
+            </h1>
+          </div>
+        </div>
+        
+        {/* Simple Login or Profile summary on mobile top bar */}
+        <div>
+          {currentUser ? (
+            <div className="flex items-center gap-1.5 bg-blue-600/10 border border-blue-600/20 rounded-xl px-2 py-0.5">
+              <ShieldCheck className="w-3 h-3 text-blue-600" />
+              <span className="text-[10px] text-slate-900 font-extrabold max-w-[80px] truncate">
+                {currentUser.name || currentUser.email.split('@')[0]}
+              </span>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsLoginOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1 rounded-xl text-[10px] transition-all cursor-pointer shadow-xs active:scale-95"
+            >
+              دخول
+            </button>
+          )}
         </div>
       </header>
 
-      {/* Primary Sub-Navigation Tabs (Unified Grid Layout / Focused Sub-Section Header) */}
-      {!isUnapprovedDelegate ? (
-        <div className="bg-stone-100/95 backdrop-blur-md border-b border-slate-200 sticky top-0 sm:top-20 z-30 shadow-sm py-2" id="navigation-box">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 space-y-2">
-          
-          {activeTab === 'dashboard' ? (
-            <nav className="grid grid-cols-3 gap-2 sm:gap-3 w-full">
-              <button
-                onClick={() => handleTabChange('dashboard')}
-                className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
-                  activeTab === 'dashboard'
-                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
-                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
-                }`}
-              >
-                <Home className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                الرئيسية
-              </button>
-
-              <button
-                onClick={() => handleTabChange('families')}
-                className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
-                  activeTab === 'families'
-                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
-                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                التعداد السكاني
-              </button>
-
-              <button
-                onClick={() => handleTabChange('donations')}
-                className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
-                  activeTab === 'donations'
-                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
-                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
-                }`}
-              >
-                <Heart className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500 fill-red-500/10" />
-                التبرعات
-              </button>
-
-              <button
-                onClick={() => handleTabChange('services')}
-                className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
-                  activeTab === 'services'
-                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
-                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
-                }`}
-              >
-                <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                الخدمات
-              </button>
-
-              {/* Merged Section Button: الخريطة ودليل القرية */}
-              <button
-                onClick={() => setIsExploreModalOpen(true)}
-                className="h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium"
-              >
-                <Compass className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 animate-pulse" />
-                الخريطة والدليل
-              </button>
-
-              <button
-                onClick={() => handleTabChange('contact')}
-                className={`h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border ${
-                  activeTab === 'contact'
-                    ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold border-blue-600 shadow-md ring-2 ring-blue-600/30 scale-102'
-                    : 'bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium'
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-pink-500" />
-                التواصل
-              </button>
-
-              {isSuperAdmin && (
+      {/* Slide-out Responsive Mobile Sidebar Drawer Overlay */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            {/* Backdrop overlay */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-black z-40 md:hidden cursor-pointer"
+            />
+            {/* Slide drawer */}
+            <motion.aside
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+              className="w-72 bg-[#0f172a] text-white fixed h-full right-0 top-0 p-6 flex flex-col gap-4 shadow-2xl z-50 overflow-y-auto md:hidden"
+            >
+              <div className="flex justify-between items-center mb-2 pb-3 border-b border-slate-800">
+                <span className="text-xs font-black text-slate-400">قائمة لوحة التحكم</span>
                 <button
-                  onClick={() => handleTabChange('admin-settings')}
-                  className="col-span-3 h-11 px-2.5 rounded-xl text-[11px] sm:text-xs md:text-sm font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border bg-white/80 text-slate-600 border-stone-200 hover:text-slate-900 font-extrabold hover:bg-blue-50/40 hover:border-blue-600/50 shadow-3xs hover:shadow-2xs opacity-85 hover:opacity-100 font-medium"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all cursor-pointer border border-slate-800"
                 >
-                  <ShieldCheck className="w-4 h-4 text-amber-500 fill-amber-500/10 animate-pulse" />
-                  إعدادات المدير العام للنظام
+                  <X className="w-5 h-5" />
                 </button>
-              )}
-            </nav>
-          ) : (
-            /* Sub-section View Header with Back to Home button */
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0 py-3 sm:py-2 bg-white border border-slate-200 rounded-2xl px-4 shadow-sm" id="subview-header">
+              </div>
+
+              {/* Sidebar Content */}
+              {renderSidebarUserSection()}
+              {renderSidebarLinks()}
+
+              <div className="mt-auto pt-4 border-t border-slate-800 text-center text-[10px] text-slate-500 font-bold leading-normal">
+                المنصة الرقمية للقرية مخصصة ومحمية © 2026
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Main Content Pane wrapper shifted left on desktop to clear fixed Sidebar */}
+      <div className="flex-1 flex flex-col md:mr-72 min-h-screen">
+        
+        {/* Dynamic Section Focused Subview Indicator */}
+        {!isUnapprovedDelegate && activeTab !== 'dashboard' && (
+          <div className="px-4 sm:px-6 lg:px-8 pt-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-2.5 bg-white border border-slate-200 rounded-2xl px-4 shadow-xs" id="subview-header">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse shrink-0"></span>
-                <h3 className="text-xs font-extrabold text-slate-900 font-extrabold truncate">
+                <h3 className="text-xs font-extrabold text-slate-900 truncate">
                   القسم النشط: {
                     activeTab === 'families' ? 'التعداد السكاني والمساكن' :
                     activeTab === 'services' ? 'إدارة الخدمات والمرافق' :
@@ -878,7 +1005,7 @@ export default function App() {
                     activeTab === 'directory' ? 'دليل خدمات القرية' :
                     activeTab === 'donations' ? 'قنوات التبرع والمساهمات' :
                     activeTab === 'contact' ? 'صندوق المقترحات والتواصل المباشر' :
-                    activeTab === 'admin-settings' ? 'إعدادات المدير العام للنظام' : 'تفاصيل القسم الفرعي'
+                    activeTab === 'admin-settings' ? 'إعدادات المشرف العام' : 'تفاصيل القسم الفرعي'
                   }
                 </h3>
               </div>
@@ -890,62 +1017,26 @@ export default function App() {
                 العودة للرئيسية
               </button>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Quick action buttons depending on the active view (Only for Admin) */}
-          {isAdmin && ((activeTab === 'families' && !isAddingFamily && !editingFamily) || (activeTab === 'services' && !isAddingService && !editingService)) && (
-            <div className="flex justify-center items-center gap-2 pt-0.5">
-              {activeTab === 'families' && (
-                <>
-                  <button
-                    onClick={() => {
-                      setIsAddingFamily(true);
-                      setIsAddingMemberOnly(false);
-                    }}
-                    className="bg-blue-600 hover:bg-blue-700 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-blue-600"
-                  >
-                    <Plus className="w-3 h-3" />
-                    تسجيل أسرة بالتعداد
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsAddingFamily(true);
-                      setIsAddingMemberOnly(true);
-                    }}
-                    className="bg-blue-50 hover:bg-[#DDE5B6] text-blue-600 px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-blue-200"
-                  >
-                    <UserPlus className="w-3 h-3" />
-                    إضافة فرد جديد
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsMovingMember(true);
-                    }}
-                    className="bg-slate-50 hover:bg-stone-100 text-[#A98467] px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-slate-200"
-                  >
-                    <Layers className="w-3 h-3 text-[#A98467]" />
-                    نقل فرد
-                  </button>
-                </>
-              )}
-              {activeTab === 'services' && (
-                <button
-                  onClick={() => setIsAddingService(true)}
-                  className="bg-[#A98467] hover:bg-[#8F6C50] text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold px-3.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer border border-[#A98467]"
-                >
-                  <Plus className="w-3 h-3" />
-                  إضافة مرفق/مشروع خدمي
-                </button>
-              )}
+        {/* Quick actions for Admins on services tab */}
+        {isAdmin && !isUnapprovedDelegate && (activeTab === 'services' && !isAddingService && !editingService) && (
+          <div className="px-4 sm:px-6 lg:px-8 pt-4">
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-3xs flex flex-wrap justify-center items-center gap-2.5">
+              <button
+                onClick={() => setIsAddingService(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.5)] font-bold px-4 py-2 rounded-xl text-[11px] flex items-center gap-1.5 shadow-xs transition-all cursor-pointer border border-blue-600"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                إضافة مرفق/مشروع خدمي
+              </button>
             </div>
-          )}
+          </div>
+        )}
 
-        </div>
-      </div>
-      ) : null}
-
-      {/* Main Container Workspace */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 flex-1 w-full" id="main-workspace">
+        {/* Main Workspace where child components render */}
+        <main className="px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full" id="main-workspace">
         
         {/* Render Form States or Main Active Tab */}
         <AnimatePresence mode="wait">
@@ -1034,54 +1125,33 @@ export default function App() {
 
               {activeTab === 'families' && (
                 <div className="space-y-6 bg-indigo-50/40 border border-indigo-200 rounded-3xl p-4 sm:p-6 shadow-sm">
-                  {/* Integrated Sub-Navigation for Census (التعداد السكاني) */}
-                  <div className="bg-stone-100 p-2 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
-                      <h3 className="text-xs font-bold text-slate-900 font-extrabold">تصفح التعداد والتقارير الموحدة للقرية</h3>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5">
+                  {censusSubView !== 'register' && (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200">
+                      <span className="text-xs font-extrabold text-slate-800">
+                        {censusSubView === 'google-sheets' ? '📂 جدول Google Sheets المدمج لتصحيح التعداد' : '📊 التقارير والمؤشرات الإحصائية العامة'}
+                      </span>
                       <button
                         onClick={() => setCensusSubView('register')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                          censusSubView === 'register'
-                            ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold shadow-2xs'
-                            : 'bg-white/80 border border-slate-200 text-slate-500 hover:text-slate-900 font-extrabold'
-                        }`}
+                        className="w-full sm:w-auto bg-[#4A5D4E] hover:bg-[#3E4C41] text-white px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xs"
                       >
-                        سجل الأسر والمواطنين
-                      </button>
-                      <button
-                        onClick={() => setCensusSubView('google-sheets')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                          censusSubView === 'google-sheets'
-                            ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold shadow-2xs'
-                            : 'bg-white/80 border border-slate-200 text-slate-500 hover:text-slate-900 font-extrabold'
-                        }`}
-                      >
-                        جدول Google Sheets المدمج
-                      </button>
-                      <button
-                        onClick={() => setCensusSubView('reports')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                          censusSubView === 'reports'
-                            ? 'bg-blue-600 text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] font-bold shadow-2xs'
-                            : 'bg-white/80 border border-slate-200 text-slate-500 hover:text-slate-900 font-extrabold'
-                        }`}
-                      >
-                        التقارير والمؤشرات الإحصائية
+                        <span>الرجوع لسجل الأسر والمواطنين 👥</span>
                       </button>
                     </div>
-                  </div>
+                  )}
 
                   {censusSubView === 'register' && (
                     <FamilyRegister
                       families={families}
                       setFamilies={setFamilies}
-                      onAddFamily={() => setIsAddingFamily(true)}
+                      onAddFamily={(isMemberOnly) => {
+                        setIsAddingFamily(true);
+                        setIsAddingMemberOnly(!!isMemberOnly);
+                      }}
                       onEditFamily={handleEditFamily}
                       onDeleteFamily={handleDeleteFamily}
                       onLocateOnMap={handleLocateFamilyOnMap}
+                      onMoveMember={() => setIsMovingMember(true)}
+                      onSetSubView={(view) => setCensusSubView(view)}
                       isAdmin={isAdmin}
                       isSuperAdmin={isSuperAdmin}
                       userRole={userRole}
@@ -1146,6 +1216,12 @@ export default function App() {
                   currentUserEmail={currentUser?.email || ''} 
                   currentUser={currentUser}
                   />
+                </div>
+              )}
+
+              {activeTab === 'calendar' && (
+                <div className="bg-emerald-50/20 border border-emerald-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+                  <GoogleCalendarEvents isAdmin={isAdmin} />
                 </div>
               )}
 
@@ -1403,6 +1479,7 @@ export default function App() {
           ))}
         </AnimatePresence>
       </div>
+      </div> {/* Closes the flex-1 md:mr-72 content column */}
     </div>
   );
 }

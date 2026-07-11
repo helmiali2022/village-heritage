@@ -85,7 +85,7 @@ export default function Dashboard({
       f.members.forEach(m => {
         totalPop++;
         if (m.gender === 'ذكر') maleCount++;
-        else femaleCount++;
+        else if (m.gender === 'أنثى') femaleCount++;
 
         if (m.healthStatus === 'ذوي احتياجات خاصة') specialNeedsCount++;
         else if (m.healthStatus === 'مرض مزمن') chronicDiseaseCount++;

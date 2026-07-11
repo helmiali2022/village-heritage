@@ -1,16 +1,19 @@
 import React, { useState, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Family, Member, parseBreadwinner } from '../types';
+import { sendAuditLog } from '../utils/auditLogger';
 import { NEIGHBORHOODS } from '../data/mockData';
 import { Search, Filter, Plus, ChevronDown, ChevronUp, MapPin, Edit2, Trash2, Phone, Calendar, ArrowUpDown, ShieldAlert, HeartPulse, Sparkles, Users, Shield, Upload, Link, RefreshCw, AlertTriangle, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
 
 interface FamilyRegisterProps {
   families: Family[];
   setFamilies: React.Dispatch<React.SetStateAction<Family[]>>;
-  onAddFamily: () => void;
+  onAddFamily: (isMemberOnly?: boolean) => void;
   onEditFamily: (family: Family) => void;
   onDeleteFamily: (id: string) => void;
   onLocateOnMap: (family: Family) => void;
+  onMoveMember?: () => void;
+  onSetSubView?: (view: 'register' | 'google-sheets' | 'reports') => void;
   isAdmin?: boolean;
   isSuperAdmin?: boolean;
   userRole?: string;
@@ -29,6 +32,8 @@ export default function FamilyRegister({
   onEditFamily,
   onDeleteFamily,
   onLocateOnMap,
+  onMoveMember,
+  onSetSubView,
   isAdmin = false,
   isSuperAdmin = false,
   userRole,
@@ -47,12 +52,29 @@ export default function FamilyRegister({
     (currentUser?.role === 'supervisor' || currentUser?.role === 'admin') ||
     (currentUser?.role === 'delegate' && currentUser?.permissions?.canEditCensus === true);
 
+  const [localNeighborhoods, setLocalNeighborhoods] = React.useState<string[]>(() => {
+    const saved = localStorage.getItem('local_neighborhoods_v1');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return NEIGHBORHOODS;
+  });
+
+  const saveLocalNeighborhoods = (list: string[]) => {
+    setLocalNeighborhoods(list);
+    localStorage.setItem('local_neighborhoods_v1', JSON.stringify(list));
+  };
+
   // Dynamic unified neighborhoods list (from Column C of the spreadsheet / families)
   const uniqueNeighborhoods = React.useMemo(() => {
     const fromFamilies = (families || []).map(f => f.neighborhood).filter(Boolean);
-    const combined = Array.from(new Set([...NEIGHBORHOODS, ...fromFamilies]));
+    const combined = Array.from(new Set([...localNeighborhoods, ...fromFamilies]));
     return combined.sort((a, b) => a.localeCompare(b, 'ar'));
-  }, [families]);
+  }, [families, localNeighborhoods]);
 
   const [googleSheetsUrl, setGoogleSheetsUrl] = useState('https://docs.google.com/spreadsheets/d/e/2PACX-1vRtQlsnxA_BqxXqesgnS6YHaDEYE_PzGurtPM_zOeDVKFBVhYMPtRyXWIHduGDxYKqLppy4NqmiMSfA/pub?output=csv');
   const [loading, setLoading] = useState(false);
@@ -85,7 +107,7 @@ export default function FamilyRegister({
   const [importMode, setImportMode] = useState<'replace' | 'append'>('replace');
   const [showAdvancedImport, setShowAdvancedImport] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [pendingCsvText, setPendingCsvText] = useState<string | null>(null);
+  const [pendingCsvText, setPendingCsvText] = useState<string | Record<string, string> | null>(null);
   const [pendingIsUrl, setPendingIsUrl] = useState(false);
   const [pendingRecordCount, setPendingRecordCount] = useState<number>(0);
 
@@ -217,7 +239,7 @@ export default function FamilyRegister({
           const breadwinnerName = row[hName > -1 ? hName : 1] || 'مواطن مجهول';
           const phone = row[hPhone > -1 ? hPhone : 2] || '';
           const neighborhood = row[hNeighborhood > -1 ? hNeighborhood : 3] || 'غير محدد';
-          const residence = row[hResidence > -1 ? hResidence : 4] || 'دائمة';
+          const residence = row._loc || row[hResidence > -1 ? hResidence : 4] || 'دائمة';
           const familyName = row[hFamilyName > -1 ? hFamilyName : 5] || 'غير محدد';
           
           const membersList: Member[] = [];
@@ -398,10 +420,18 @@ export default function FamilyRegister({
     }
   };
 
-  const prepareImport = (csvText: string, isFromUrl: boolean) => {
+  const prepareImport = (csvText: string | Record<string, string>, isFromUrl: boolean) => {
     try {
-      const lines = parseCSV(csvText);
-      const recordsCount = lines.slice(1).filter(row => row.length > 1 || (row.length === 1 && row[0] !== '')).length;
+      let recordsCount = 0;
+      if (typeof csvText === 'object') {
+        const sheets = csvText;
+        const b1 = sheets['داخل القرية'] ? parseCSV(sheets['داخل القرية']).slice(1).length : 0;
+        const b2 = sheets['خارج القرية'] ? parseCSV(sheets['خارج القرية']).slice(1).length : 0;
+        recordsCount = b1 + b2;
+      } else {
+        const lines = parseCSV(csvText);
+        recordsCount = lines.slice(1).filter(row => row.length > 1 || (row.length === 1 && row[0] !== '')).length;
+      }
       
       if (recordsCount === 0) {
         setError('الملف المرفوع فارغ أو لا يحتوي على أسطر صالحة.');
@@ -447,8 +477,15 @@ export default function FamilyRegister({
           }
           // التحويل التلقائي في الذاكرة
           const csvTextObj = convertSpreadsheetToData(arrayBuffer, file.name);
-          const firstSheetCsv = Object.values(csvTextObj)[0] || '';
-          prepareImport(firstSheetCsv, false);
+          const hasSpecificSheets = Object.keys(csvTextObj).some(name => 
+            name.includes('داخل القرية') || name.includes('خارج القرية')
+          );
+          if (hasSpecificSheets) {
+            prepareImport(csvTextObj, false);
+          } else {
+            const firstSheetCsv = Object.values(csvTextObj)[0] || '';
+            prepareImport(firstSheetCsv, false);
+          }
         } catch (err) {
           setError('عذراً، يرجى التأكد من رفع ملف جدول بيانات صحيح.');
         } finally {
@@ -489,8 +526,15 @@ export default function FamilyRegister({
             throw new Error();
           }
           const csvTextObj = convertSpreadsheetToData(arrayBuffer, file.name);
-          const firstSheetCsv = Object.values(csvTextObj)[0] || '';
-          prepareImport(firstSheetCsv, false);
+          const hasSpecificSheets = Object.keys(csvTextObj).some(name => 
+            name.includes('داخل القرية') || name.includes('خارج القرية')
+          );
+          if (hasSpecificSheets) {
+            prepareImport(csvTextObj, false);
+          } else {
+            const firstSheetCsv = Object.values(csvTextObj)[0] || '';
+            prepareImport(firstSheetCsv, false);
+          }
         } catch {
           // If array buffer excel load failed, try reading file as CSV text
           const secondReader = new FileReader();
@@ -625,11 +669,25 @@ export default function FamilyRegister({
       if (isBinary) {
         const arrayBuffer = await response.arrayBuffer();
         const csvTextObj = convertSpreadsheetToData(arrayBuffer, 'downloaded_sheet');
-        const sheetsCsvText = Object.values(csvTextObj).join('\n'); // temporarily join or process appropriately
-        if (bypassConfirm === true) {
-          importCSVData(sheetsCsvText, true);
+        
+        // If it contains multiple relevant sheets, pass the whole object, otherwise fall back to first sheet
+        const hasSpecificSheets = Object.keys(csvTextObj).some(name => 
+          name.includes('داخل القرية') || name.includes('خارج القرية')
+        );
+
+        if (hasSpecificSheets) {
+          if (bypassConfirm === true) {
+            importCSVData(csvTextObj, true);
+          } else {
+            prepareImport(csvTextObj, true);
+          }
         } else {
-          prepareImport(sheetsCsvText, true);
+          const firstSheetCsv = Object.values(csvTextObj)[0] || '';
+          if (bypassConfirm === true) {
+            importCSVData(firstSheetCsv, true);
+          } else {
+            prepareImport(firstSheetCsv, true);
+          }
         }
       } else {
         const textText = await response.text();
@@ -651,10 +709,149 @@ export default function FamilyRegister({
     }
   };
   const [searchQuery, setSearchQuery] = useState('');
+  const [showImportSyncSection, setShowImportSyncSection] = useState(false);
+  const [showExtendedSearch, setShowExtendedSearch] = useState(false);
+  const [showBulkEditModal, setShowBulkEditModal] = useState(false);
+  const [bulkFieldToUpdate, setBulkFieldToUpdate] = useState<'familyName' | 'gender' | 'neighborhood'>('familyName');
+  const [bulkOldVal, setBulkOldVal] = useState('');
+  const [bulkNewVal, setBulkNewVal] = useState('');
+  const [topSearchName, setTopSearchName] = useState('');
+  const [topSearchNationalId, setTopSearchNationalId] = useState('');
+  const [topSearchVillage, setTopSearchVillage] = useState('');
   const [selectedFamilyIds, setSelectedFamilyIds] = useState<string[]>([]);
   const [bulkSelectedSurname, setBulkSelectedSurname] = useState('');
   const [bulkCustomSurname, setBulkCustomSurname] = useState('');
   const [bulkIsNewSurname, setBulkIsNewSurname] = useState(false);
+
+  const [showBulkEditPanel, setShowBulkEditPanel] = useState(false);
+  const [bulkSelectedGender, setBulkSelectedGender] = useState<'ذكر' | 'أنثى' | ''>('');
+  const [bulkGenderTarget, setBulkGenderTarget] = useState<'all' | 'breadwinner'>('all');
+  const [bulkSelectedNeighborhood, setBulkSelectedNeighborhood] = useState('');
+  const [bulkCustomNeighborhood, setBulkCustomNeighborhood] = useState('');
+  const [bulkIsNewNeighborhood, setBulkIsNewNeighborhood] = useState(false);
+
+  // Super Admin Neighborhood States
+  const [showNeighborhoodPanel, setShowNeighborhoodPanel] = useState(false);
+  const [selectedNhToEdit, setSelectedNhToEdit] = useState('');
+  const [newNhName, setNewNhName] = useState('');
+  const [moveSourceNh, setMoveSourceNh] = useState('');
+  const [moveDestNh, setMoveDestNh] = useState('');
+  const [selectedNhToDelete, setSelectedNhToDelete] = useState('');
+  const [deleteActionOption, setDeleteActionOption] = useState('clear');
+  const [deleteFallbackNh, setDeleteFallbackNh] = useState('');
+
+  // 1. Rename Neighborhood
+  const handleRenameNeighborhood = () => {
+    if (!selectedNhToEdit || !newNhName.trim()) return;
+    const oldName = selectedNhToEdit;
+    const newName = newNhName.trim();
+
+    if (window.confirm(`هل أنت متأكد من تغيير اسم المحلة "${oldName}" إلى "${newName}"؟\nسيؤدي هذا إلى تحديث كافة الأسر والأفراد المسجلين تحتها فوراً.`)) {
+      const updatedFamilies = families.map(f => {
+        if (f.neighborhood === oldName) {
+          return {
+            ...f,
+            neighborhood: newName,
+            residence: f.residence === oldName ? newName : f.residence,
+            members: (f.members || []).map(m => ({
+              ...m,
+              neighborhood: m.neighborhood === oldName ? newName : m.neighborhood,
+              residence: m.residence === oldName ? newName : m.residence
+            }))
+          };
+        }
+        return f;
+      });
+
+      // Update local neighborhoods state to reflect rename
+      const filteredList = localNeighborhoods.map(nh => nh === oldName ? newName : nh);
+      saveLocalNeighborhoods(filteredList);
+
+      setFamilies(updatedFamilies);
+      setSelectedNhToEdit('');
+      setNewNhName('');
+      sendAuditLog(currentUser, `إدارة المحلات: تم تغيير اسم المحلة السكنية من [${oldName}] إلى [${newName}] وتحديث سجلات العائلات والتابعين المرتبطة بها تلقائياً.`, 'تعديل', 'التعداد');
+      alert(`✓ تم بنجاح تغيير اسم المحلة من "${oldName}" إلى "${newName}" وتحديث كافة السجلات الحية المرتبطة.`);
+    }
+  };
+
+  // 2. Move families Bulk
+  const handleMoveFamiliesBulk = () => {
+    if (!moveSourceNh || !moveDestNh) return;
+    const src = moveSourceNh;
+    const dest = moveDestNh;
+
+    if (window.confirm(`هل أنت متأكد من نقل كافة الأسر والتابعين من محلة "${src}" إلى محلة "${dest}"؟`)) {
+      const updatedFamilies = families.map(f => {
+        if (f.neighborhood === src) {
+          return {
+            ...f,
+            neighborhood: dest,
+            residence: f.residence === src ? dest : f.residence,
+            members: (f.members || []).map(m => ({
+              ...m,
+              neighborhood: m.neighborhood === src ? dest : m.neighborhood,
+              residence: m.residence === src ? dest : m.residence
+            }))
+          };
+        }
+        return f;
+      });
+
+      setFamilies(updatedFamilies);
+      setMoveSourceNh('');
+      setMoveDestNh('');
+      sendAuditLog(currentUser, `إدارة المحلات - نقل جماعي: تم نقل كافة العائلات والتابعين من محلة [${src}] إلى محلة [${dest}] جماعياً وتحديث العناوين المرتبطة.`, 'تعديل', 'التعداد');
+      alert(`✓ تم بنجاح نقل كافة الأسر والأفراد المرتبطين من محلة "${src}" إلى محلة "${dest}" بنجاح.`);
+    }
+  };
+
+  // 3. Delete Neighborhood
+  const handleDeleteNeighborhood = () => {
+    if (!selectedNhToDelete) return;
+    const nhToDelete = selectedNhToDelete;
+
+    const count = families.filter(f => f.neighborhood === nhToDelete).length;
+    let confirmMsg = `هل أنت متأكد من حذف المحلة "${nhToDelete}"؟\n`;
+    if (count > 0) {
+      if (deleteActionOption === 'move') {
+        confirmMsg += `يوجد حالياً ${count} عائلات مسجلة تحت هذه المحلة وسيتم نقلهم تلقائياً إلى محلة "${deleteFallbackNh}".`;
+      } else {
+        confirmMsg += `يوجد حالياً ${count} عائلات مسجلة تحت هذه المحلة وسيتم تصفير محلتهم لتصبح غير محددة.`;
+      }
+    } else {
+      confirmMsg += `لا توجد أسر مسجلة تحت هذه المحلة حالياً.`;
+    }
+
+    if (window.confirm(confirmMsg)) {
+      const updatedFamilies = families.map(f => {
+        if (f.neighborhood === nhToDelete) {
+          const targetNh = deleteActionOption === 'move' ? deleteFallbackNh : '';
+          return {
+            ...f,
+            neighborhood: targetNh,
+            residence: f.residence === nhToDelete ? targetNh : f.residence,
+            members: (f.members || []).map(m => ({
+              ...m,
+              neighborhood: m.neighborhood === nhToDelete ? targetNh : m.neighborhood,
+              residence: m.residence === nhToDelete ? targetNh : m.residence
+            }))
+          };
+        }
+        return f;
+      });
+
+      // Remove from localNeighborhoods
+      const filteredList = localNeighborhoods.filter(nh => nh !== nhToDelete);
+      saveLocalNeighborhoods(filteredList);
+
+      setFamilies(updatedFamilies);
+      setSelectedNhToDelete('');
+      setDeleteFallbackNh('');
+      sendAuditLog(currentUser, `إدارة المحلات: تم حذف المحلة [${nhToDelete}] مع ${count} عائلات تابعة لها (خيار المعالجة: ${deleteActionOption === 'move' ? `نقل إلى محلة ${deleteFallbackNh}` : 'تصفير وعزل'}).`, 'حذف', 'التعداد');
+      alert(`✓ تم بنجاح حذف المحلة "${nhToDelete}" وتطهير/مزامنة السجلات الحية للأسر المرتبطة.`);
+    }
+  };
 
   // Dynamic unified surnames list
   const uniqueSurnames = useMemo(() => {
@@ -664,31 +861,144 @@ export default function FamilyRegister({
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b, 'ar'));
   }, [families]);
 
-  const handleBulkSaveSurnames = () => {
+  const handleUnifiedBulkSave = () => {
+    const isGlobalReplace = selectedFamilyIds.length === 0;
+
     const finalSurname = bulkIsNewSurname ? bulkCustomSurname.trim() : bulkSelectedSurname.trim();
-    if (!finalSurname) {
-      alert('يرجى اختيار أو كتابة اللقب الموحد لتطبيقه جماعياً');
+    const finalNeighborhood = bulkIsNewNeighborhood ? bulkCustomNeighborhood.trim() : bulkSelectedNeighborhood.trim();
+    const genderToApply = bulkSelectedGender;
+
+    if (!finalSurname && !genderToApply && !finalNeighborhood) {
+      alert('الرجاء تحديد حقل واحد على الأقل وتعبئة قيمته الجديدة لتطبيق التعديل الجماعي.');
       return;
     }
 
-    if (!window.confirm(`هل أنت متأكد من تغيير اللقب إلى "${finalSurname}" لجميع العائلات المحددة (${selectedFamilyIds.length})؟`)) {
+    if (isGlobalReplace && !bulkOldVal.trim() && !genderToApply) {
+      alert('في حالة عدم تحديد عائلات من الجدول، يتوجب إدخال القيمة القديمة المراد البحث عنها واستبدالها بالقيمة الجديدة.');
       return;
     }
 
+    let confirmMsg = '';
+    if (isGlobalReplace) {
+      confirmMsg = `⚠️ إجراء استبدال عام وشامل على كامل قاعدة البيانات:\n`;
+      if (finalSurname) confirmMsg += `- استبدال اللقب القديم "${bulkOldVal}" باللقب الجديد "${finalSurname}" في كافة سجلات التعداد.\n`;
+      if (finalNeighborhood) confirmMsg += `- استبدال المحلة القديمة "${bulkOldVal}" بالمحلة الجديدة "${finalNeighborhood}" في كافة سجلات التعداد.\n`;
+      if (genderToApply) confirmMsg += `- استبدال الجنس القديم "${bulkOldVal}" بالجنس الجديد "${genderToApply}" لكافة الأفراد بالتعداد.\n`;
+    } else {
+      confirmMsg = `🔄 إجراء تعديل جماعي على العائلات المحددة بالجدول (${selectedFamilyIds.length} عائلة):\n`;
+      if (finalSurname) confirmMsg += `- تغيير اللقب إلى: "${finalSurname}"\n`;
+      if (finalNeighborhood) confirmMsg += `- تغيير المحلة إلى: "${finalNeighborhood}"\n`;
+      if (genderToApply) confirmMsg += `- تغيير الجنس (${bulkGenderTarget === 'all' ? 'لكل الأفراد' : 'لأرباب الأسر فقط'}) إلى: "${genderToApply}"\n`;
+    }
+
+    if (!window.confirm(confirmMsg + '\nهل أنت متأكد من تطبيق التعديلات الآن؟')) {
+      return;
+    }
+
+    let updatedCount = 0;
     const updatedFamilies = families.map(f => {
-      if (selectedFamilyIds.includes(f.id)) {
-        return { ...f, familyName: finalSurname };
+      let isUpdated = false;
+      let updatedFamily = { ...f };
+
+      if (isGlobalReplace) {
+        // Global Find & Replace
+        if (finalSurname && f.familyName?.trim() === bulkOldVal.trim()) {
+          updatedFamily.familyName = finalSurname;
+          isUpdated = true;
+        }
+        if (finalNeighborhood && f.neighborhood?.trim() === bulkOldVal.trim()) {
+          updatedFamily.neighborhood = finalNeighborhood;
+          isUpdated = true;
+        }
+        if (genderToApply) {
+          const updatedMembers = f.members.map(m => {
+            if (m.gender === bulkOldVal) {
+              return { ...m, gender: genderToApply as 'ذكر' | 'أنثى' };
+            }
+            return m;
+          });
+          if (JSON.stringify(updatedMembers) !== JSON.stringify(f.members)) {
+            updatedFamily.members = updatedMembers;
+            isUpdated = true;
+          }
+        }
+      } else {
+        // Apply to Selected
+        if (selectedFamilyIds.includes(f.id)) {
+          if (finalSurname) {
+            updatedFamily.familyName = finalSurname;
+            isUpdated = true;
+          }
+          if (finalNeighborhood) {
+            updatedFamily.neighborhood = finalNeighborhood;
+            isUpdated = true;
+          }
+          if (genderToApply) {
+            if (bulkGenderTarget === 'breadwinner') {
+              updatedFamily.members = updatedFamily.members.map((m, idx) => {
+                if (idx === 0 || m.name === updatedFamily.breadwinnerName) {
+                  return { ...m, gender: genderToApply };
+                }
+                return m;
+              });
+            } else {
+              updatedFamily.members = updatedFamily.members.map(m => ({
+                ...m, gender: genderToApply
+              }));
+            }
+            isUpdated = true;
+          }
+        }
       }
-      return f;
+
+      if (isUpdated) {
+        updatedCount++;
+      }
+      return updatedFamily;
     });
+
+    if (updatedCount === 0) {
+      if (isGlobalReplace) {
+        alert(`لم يتم العثور على أي سجلات تطابق القيمة القديمة "${bulkOldVal}" لتعديلها.`);
+      } else {
+        alert('لم يتم تعديث أي سجلات. يرجى التحقق من المدخلات.');
+      }
+      return;
+    }
 
     setFamilies(updatedFamilies);
     setSelectedFamilyIds([]);
+    
+    // Send audit log for bulk operations
+    let auditDesc = '';
+    if (isGlobalReplace) {
+      auditDesc = `تعديل جماعي (استبدال عام): تم البحث عن القيمة القديمة [${bulkOldVal}] واستبدالها بـ: `;
+      if (finalSurname) auditDesc += `[اللقب الجديد: ${finalSurname}] `;
+      if (finalNeighborhood) auditDesc += `[المحلة الجديدة: ${finalNeighborhood}] `;
+      if (genderToApply) auditDesc += `[الجنس الجديد: ${genderToApply}] `;
+      auditDesc += `لكافة سجلات قاعدة البيانات المتأثرة (${updatedCount} سجلات)`;
+    } else {
+      auditDesc = `تعديل جماعي (على عائلات محددة): تم تعديل عدد [${selectedFamilyIds.length}] عائلات بـ: `;
+      if (finalSurname) auditDesc += `[اللقب: ${finalSurname}] `;
+      if (finalNeighborhood) auditDesc += `[المحلة: ${finalNeighborhood}] `;
+      if (genderToApply) auditDesc += `[الجنس: ${genderToApply}] `;
+    }
+    sendAuditLog(currentUser, auditDesc, 'تعديل', 'التعداد');
+
     setBulkSelectedSurname('');
     setBulkIsNewSurname(false);
     setBulkCustomSurname('');
-    alert('تم تحديث الألقاب وحفظها جماعياً بنجاح في قاعدة البيانات!');
+    setBulkSelectedGender('');
+    setBulkSelectedNeighborhood('');
+    setBulkIsNewNeighborhood(false);
+    setBulkCustomNeighborhood('');
+    setBulkOldVal('');
+    setShowBulkEditModal(false);
+
+    alert(`تم التعديل الجماعي بنجاح! تم تحديث ${updatedCount} عائلة/سجل بنجاح.`);
   };
+
+  const [activeSectionTab, setActiveSectionTab] = useState<'family_mgmt' | 'census_reports'>('family_mgmt');
   const [selectedNeighborhood, setSelectedNeighborhood] = useState('الكل');
   const [selectedSupportStatus, setSelectedSupportStatus] = useState('الكل');
   const [selectedResidence, setSelectedResidence] = useState('الكل');
@@ -743,14 +1053,43 @@ export default function FamilyRegister({
   const filteredFamilies = useMemo(() => {
     let result = [...families];
 
+    // New Top Advanced Search Logic
+    if (topSearchName.trim()) {
+      const q = topSearchName.toLowerCase();
+      result = result.filter(f => 
+        (f.breadwinnerName && f.breadwinnerName.toLowerCase().includes(q)) || 
+        (f.familyName && f.familyName.toLowerCase().includes(q)) ||
+        f.members.some(m => m.name && m.name.toLowerCase().includes(q))
+      );
+    }
+
+    if (topSearchNationalId.trim()) {
+      const q = topSearchNationalId.toLowerCase();
+      result = result.filter(f => 
+        (f.nationalId && f.nationalId.includes(q)) || 
+        f.members.some(m => m.nationalId && m.nationalId.includes(q))
+      );
+    }
+
+    if (topSearchVillage.trim()) {
+      const q = topSearchVillage.toLowerCase();
+      result = result.filter(f => 
+        f.neighborhood && f.neighborhood.toLowerCase().includes(q)
+      );
+    }
+
     // Search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(f => 
-        f.familyName.toLowerCase().includes(q) ||
-        f.breadwinnerName.toLowerCase().includes(q) ||
-        f.phone.includes(q) ||
-        (f.notes && f.notes.toLowerCase().includes(q))
+        (f.familyName && f.familyName.toLowerCase().includes(q)) ||
+        (f.breadwinnerName && f.breadwinnerName.toLowerCase().includes(q)) ||
+        (f.phone && f.phone.includes(q)) ||
+        (f.notes && f.notes.toLowerCase().includes(q)) ||
+        f.members.some(m => 
+          (m.name && m.name.toLowerCase().includes(q)) ||
+          (m.phone && m.phone.includes(q))
+        )
       );
     }
 
@@ -834,6 +1173,9 @@ export default function FamilyRegister({
   }, [
     families, 
     searchQuery, 
+    topSearchName,
+    topSearchNationalId,
+    topSearchVillage,
     selectedNeighborhood, 
     selectedSupportStatus, 
     selectedResidence, 
@@ -907,8 +1249,648 @@ export default function FamilyRegister({
         </button>
       </div>
 
+      {/* لوحة الإحصاءات العامة للمرصد السكاني */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white rounded-2xl p-4 border border-[#E2DED0] shadow-2xs flex items-center gap-3 text-right" dir="rtl">
+          <div className="p-3 rounded-xl bg-blue-50 text-blue-700">
+            <Users className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] text-[#7A8B7E] font-black block">إجمالي العائلات</span>
+            <span className="text-sm font-extrabold text-[#2D3A30] font-mono">{families.length} عائلة</span>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-[#E2DED0] shadow-2xs flex items-center gap-3 text-right" dir="rtl">
+          <div className="p-3 rounded-xl bg-emerald-50 text-emerald-700">
+            <Users className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] text-[#7A8B7E] font-black block">المواطنين المسجلين</span>
+            <span className="text-sm font-extrabold text-emerald-800 font-mono">
+              {families.reduce((acc, f) => acc + f.members.length, 0)} نسمة
+            </span>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-[#E2DED0] shadow-2xs flex items-center gap-3 text-right" dir="rtl">
+          <div className="p-3 rounded-xl bg-amber-50 text-amber-700">
+            <Shield className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] text-[#7A8B7E] font-black block">مستحقين للدعم</span>
+            <span className="text-sm font-extrabold text-amber-900 font-mono">
+              {families.filter(f => f.supportStatus === 'مستحق للدعم').length} أسرة
+            </span>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-[#E2DED0] shadow-2xs flex items-center gap-3 text-right" dir="rtl">
+          <div className="p-3 rounded-xl bg-purple-50 text-purple-700">
+            <FileSpreadsheet className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] text-[#7A8B7E] font-black block">المحلات والقرى</span>
+            <span className="text-sm font-extrabold text-purple-900 font-mono">
+              {new Set(families.map(f => f.neighborhood).filter(Boolean)).size} محلات
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 1. Unified Search and Advanced Filters Panel */}
+      <div className="bg-[#FDFBF7] rounded-3xl p-5 border border-[#E2DED0] shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#E2DED0] pb-3">
+          <div className="flex items-center gap-2">
+            <Search className="w-5 h-5 text-[#4A5D4E]" />
+            <h3 className="font-extrabold text-[#2D3A30] text-sm">محرك البحث والاستعلام التلقائي الموحد للمواطنين</h3>
+          </div>
+          <button
+            onClick={() => {
+              setSearchQuery('');
+              setTopSearchNationalId('');
+              setSelectedNeighborhood('الكل');
+              setSelectedSupportStatus('الكل');
+              setSelectedResidence('الكل');
+              setSelectedHealthFilter('الكل');
+              setAdvSearchMinMembers('');
+              setAdvSearchMaxMembers('');
+            }}
+            disabled={!searchQuery && !topSearchNationalId && selectedNeighborhood === 'الكل' && selectedSupportStatus === 'الكل' && selectedResidence === 'الكل' && selectedHealthFilter === 'الكل' && advSearchMinMembers === '' && advSearchMaxMembers === ''}
+            className="text-[10px] text-red-600 hover:text-red-700 font-bold flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-0"
+          >
+            <RefreshCw className="w-3 h-3" />
+            إعادة تعيين معاملات البحث
+          </button>
+        </div>
+
+        {/* Quick Main Search Fields */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Main Global Search (Name, Phone, Surname) */}
+          <div className="relative">
+            <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">بحث بالاسم، اللقب أو الهاتف (رب الأسرة أو التابع)</label>
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="ابحث بالاسم، اللقب، أو رقم الهاتف..."
+                className="w-full pl-3 pr-8 py-2 rounded-xl border border-[#E2DED0] bg-white text-xs text-[#3E4C41] font-medium outline-none focus:border-[#4A5D4E] transition-all text-right"
+              />
+              <Search className="absolute right-2.5 top-2.5 w-3.5 h-3.5 text-[#7A8B7E]" />
+            </div>
+          </div>
+
+          {/* National ID Search */}
+          <div>
+            <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">الرقم الوطني للبحث المباشر</label>
+            <input
+              type="text"
+              value={topSearchNationalId}
+              onChange={(e) => setTopSearchNationalId(e.target.value)}
+              placeholder="اكتب الرقم الوطني..."
+              className="w-full px-3 py-2 rounded-xl border border-[#E2DED0] bg-white text-xs text-[#3E4C41] font-medium outline-none focus:border-[#4A5D4E] transition-all font-mono text-right"
+            />
+          </div>
+
+          {/* Neighborhood filter */}
+          <div>
+            <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">المحلة السكنية الحالية</label>
+            <select
+              value={selectedNeighborhood}
+              onChange={(e) => setSelectedNeighborhood(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-[#E2DED0] bg-white text-xs text-[#3E4C41] font-medium outline-none focus:border-[#4A5D4E] text-right"
+            >
+              <option value="الكل">جميع المحلات والقرى</option>
+              {uniqueNeighborhoods.map(n => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Expandable Advanced Options Toggle */}
+        <div className="flex justify-center border-t border-[#F4F1EA] pt-2">
+          <button
+            onClick={() => setShowExtendedSearch(!showExtendedSearch)}
+            className="flex items-center gap-1 text-[11px] font-bold text-[#4A5D4E] hover:text-[#2D3A30] bg-transparent border-0 cursor-pointer"
+          >
+            <span>{showExtendedSearch ? 'إخفاء خيارات الفلترة المتقدمة' : 'إظهار المزيد من فلاتر البحث والفلترة المتقدمة'}</span>
+            {showExtendedSearch ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+        </div>
+
+        {/* Secondary Extended Filters Grid */}
+        {showExtendedSearch && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-[#F4F1EA]/30 p-4 rounded-2xl border border-[#E2DED0]/50 animate-fadeIn">
+            {/* Residence status */}
+            <div>
+              <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">حالة الإقامة</label>
+              <select
+                value={selectedResidence}
+                onChange={(e) => setSelectedResidence(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-xl border border-[#E2DED0] bg-white text-xs text-[#3E4C41] font-medium outline-none text-right"
+              >
+                <option value="الكل">جميع الحالات</option>
+                {residenceOptions.map(opt => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Support status */}
+            <div>
+              <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">حالة الاستحقاق للدعم</label>
+              <select
+                value={selectedSupportStatus}
+                onChange={(e) => setSelectedSupportStatus(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-xl border border-[#E2DED0] bg-white text-xs text-[#3E4C41] font-medium outline-none text-right"
+              >
+                <option value="الكل">جميع مستويات الاستحقاق</option>
+                <option value="مستحق للدعم">مستحق للدعم</option>
+                <option value="تحت الدراسة">تحت الدراسة</option>
+                <option value="غير مستحق / مكتفي">مكتفي ذاتياً</option>
+              </select>
+            </div>
+
+            {/* Health condition */}
+            <div>
+              <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">الحالة الصحية لأفراد العائلة</label>
+              <select
+                value={selectedHealthFilter}
+                onChange={(e) => setSelectedHealthFilter(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-xl border border-[#E2DED0] bg-white text-xs text-[#3E4C41] font-medium outline-none text-right"
+              >
+                <option value="الكل">جميع الحالات</option>
+                <option value="ذوي احتياجات خاصة">أسر بها ذوي احتياجات خاصة</option>
+                <option value="مرض مزمن">أسر بها مرضى مزمنين</option>
+              </select>
+            </div>
+
+            {/* Members Range */}
+            <div>
+              <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">نطاق أفراد العائلة</label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min="1"
+                  value={advSearchMinMembers === '' ? '' : advSearchMinMembers}
+                  onChange={(e) => setAdvSearchMinMembers(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                  placeholder="من"
+                  className="w-full px-2 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] outline-none text-center"
+                />
+                <span className="text-[10px] text-[#7A8B7E] font-bold">إلى</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={advSearchMaxMembers === '' ? '' : advSearchMaxMembers}
+                  onChange={(e) => setAdvSearchMaxMembers(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                  placeholder="إلى"
+                  className="w-full px-2 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] outline-none text-center"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 2. Dual Collapsible Sections / Tabs (إدارة الأسرة والأفراد & التعداد والتقارير الموحدة) */}
+      <div className="bg-white rounded-3xl border border-[#E2DED0] p-5 shadow-sm space-y-4">
+        {/* Tab Headers */}
+        <div className="flex flex-col sm:flex-row gap-2 border-b border-[#F4F1EA] pb-3">
+          <button
+            onClick={() => setActiveSectionTab('family_mgmt')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              activeSectionTab === 'family_mgmt'
+                ? 'bg-[#4A5D4E] text-white shadow-xs'
+                : 'bg-[#FDFBF7] hover:bg-[#F4F1EA] text-[#4A5D4E] border border-[#E2DED0]'
+            }`}
+          >
+            <Users className="w-4 h-4 text-inherit" />
+            قسم [إدارة الأسرة والأفراد]
+          </button>
+          <button
+            onClick={() => setActiveSectionTab('census_reports')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              activeSectionTab === 'census_reports'
+                ? 'bg-[#4A5D4E] text-white shadow-xs'
+                : 'bg-[#FDFBF7] hover:bg-[#F4F1EA] text-[#4A5D4E] border border-[#E2DED0]'
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4 text-inherit" />
+            قسم [التعداد والتقارير الموحدة]
+          </button>
+        </div>
+
+        {/* Tab Contents */}
+        {activeSectionTab === 'family_mgmt' && (
+          <div className="space-y-3 animate-fadeIn">
+            <p className="text-[11px] text-[#7A8B7E] text-right font-semibold">
+              تسجيل العائلات، وإضافة المواطنين، ونقل الأفراد وتعديل الخصائص جماعياً.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              <button
+                onClick={() => onAddFamily(false)}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-blue-600 shadow-3xs hover:scale-[1.01]"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                تسجيل أسرة
+              </button>
+              <button
+                onClick={() => onAddFamily(true)}
+                className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-[#2E7D32] shadow-3xs hover:scale-[1.01]"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                إضافة فرد
+              </button>
+              <button
+                onClick={onMoveMember}
+                className="bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-amber-200 shadow-3xs hover:scale-[1.01]"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-amber-800" />
+                نقل فرد
+              </button>
+              <button
+                onClick={() => {
+                  setShowBulkEditPanel(!showBulkEditPanel);
+                  setShowNeighborhoodPanel(false);
+                }}
+                className={`font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-3xs hover:scale-[1.01] ${
+                  showBulkEditPanel
+                    ? 'bg-[#4A5D4E] text-white border border-[#4A5D4E]'
+                    : 'bg-white hover:bg-gray-50 text-[#3E4C41] border border-[#E2DED0]'
+                }`}
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                تعديل جماعي
+              </button>
+              {isSuperAdminUser && (
+                <button
+                  onClick={() => {
+                    setShowNeighborhoodPanel(!showNeighborhoodPanel);
+                    setShowBulkEditPanel(false);
+                  }}
+                  className={`col-span-2 md:col-span-4 lg:col-span-1 font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-3xs hover:scale-[1.01] ${
+                    showNeighborhoodPanel
+                      ? 'bg-purple-700 text-white border border-purple-700'
+                      : 'bg-purple-50 hover:bg-purple-100 text-purple-950 border border-purple-200'
+                  }`}
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  إدارة المحلات السكنية 🛠️
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeSectionTab === 'census_reports' && (
+          <div className="space-y-3 animate-fadeIn">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <p className="text-[11px] text-[#7A8B7E] text-right font-semibold">
+                إحصاءات المرصد، التقارير المتقدمة، وأدوات المزامنة الحية واستيراد البيانات.
+              </p>
+              <div className="flex flex-wrap gap-2 text-[10px] font-bold shrink-0">
+                <span className="bg-sky-50 border border-sky-200 text-sky-800 px-3 py-1.5 rounded-xl">
+                  📂 {families.length} أسر
+                </span>
+                <span className="bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-1.5 rounded-xl">
+                  👥 {families.reduce((acc, f) => acc + f.members.length, 0)} نسمة
+                </span>
+                <span className="bg-[#E9F0E0] border border-[#DDE5B6] text-[#4A5D4E] px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  {dataSourceStatus}
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <button
+                onClick={() => onSetSubView?.('google-sheets')}
+                className="bg-white hover:bg-[#F4F1EA] text-[#4A5D4E] border border-[#E2DED0] py-3 px-4 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-[1.01]"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                جدول Google Sheets المدمج
+              </button>
+              <button
+                onClick={() => onSetSubView?.('reports')}
+                className="bg-white hover:bg-[#F4F1EA] text-[#4A5D4E] border border-[#E2DED0] py-3 px-4 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-[1.01]"
+              >
+                <Users className="w-4 h-4" />
+                التقارير والمؤشرات الإحصائية
+              </button>
+              <button
+                onClick={() => setShowImportSyncSection(!showImportSyncSection)}
+                className={`py-3 px-4 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-3xs hover:scale-[1.01] ${
+                  showImportSyncSection
+                    ? 'bg-[#4A5D4E] text-white border border-[#4A5D4E]'
+                    : 'bg-white hover:bg-gray-50 text-[#3E4C41] border border-[#E2DED0]'
+                }`}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                لوحة الاستيراد ومزامنة البيانات
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Super Admin Neighborhood Management Panel */}
+      {showNeighborhoodPanel && isSuperAdminUser && (
+        <div className="bg-[#FAF8FC] p-6 rounded-3xl border-2 border-purple-300 shadow-md space-y-4 animate-fadeIn text-right mb-4" dir="rtl">
+          <div className="flex items-center gap-3 border-b border-purple-100 pb-3">
+            <span className="text-xl">🛠️</span>
+            <div>
+              <h4 className="font-extrabold text-xs sm:text-sm text-purple-950">إدارة المحلات السكنية وتعديلها (صلاحيات المشرف العام)</h4>
+              <p className="text-[10px] text-purple-700">
+                يمكنك تعديل أسماء المحلات السكنية، أو نقل كافة الأسر التابعة لمحلة إلى محلة أخرى، أو حذف المحلة تماماً من السجل السكني.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Column 1: Edit Neighborhood Name */}
+            <div className="bg-white p-4 rounded-2xl border border-purple-100 space-y-3">
+              <h5 className="text-xs font-bold text-purple-900 border-b border-purple-50 pb-1.5 flex items-center gap-1">
+                <span>✏️</span> تعديل اسم المحلة السكنية
+              </h5>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1 font-bold">اختر المحلة المراد تعديلها</label>
+                <select
+                  value={selectedNhToEdit}
+                  onChange={(e) => {
+                    setSelectedNhToEdit(e.target.value);
+                    setNewNhName(e.target.value);
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-purple-200 text-xs text-purple-950 bg-[#FAF8FC] outline-none"
+                >
+                  <option value="">-- اختر المحلة --</option>
+                  {uniqueNeighborhoods.map(nh => (
+                    <option key={nh} value={nh}>{nh}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1 font-bold">الاسم الجديد للمحلة</label>
+                <input
+                  type="text"
+                  value={newNhName}
+                  onChange={(e) => setNewNhName(e.target.value)}
+                  placeholder="اكتب الاسم الجديد..."
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-purple-200 text-xs text-purple-950 bg-white outline-none text-right"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleRenameNeighborhood}
+                disabled={!selectedNhToEdit || !newNhName.trim() || selectedNhToEdit === newNhName.trim()}
+                className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition-all disabled:opacity-50 cursor-pointer"
+              >
+                تحديث وحفظ الاسم الجديد
+              </button>
+            </div>
+
+            {/* Column 2: Move Families Bulk */}
+            <div className="bg-white p-4 rounded-2xl border border-purple-100 space-y-3">
+              <h5 className="text-xs font-bold text-purple-900 border-b border-purple-50 pb-1.5 flex items-center gap-1">
+                <span>🔄</span> نقل كافة الأسر لمحلة أخرى
+              </h5>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1 font-bold">من المحلة السكنية (المصدر)</label>
+                <select
+                  value={moveSourceNh}
+                  onChange={(e) => setMoveSourceNh(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-purple-200 text-xs text-purple-950 bg-[#FAF8FC] outline-none"
+                >
+                  <option value="">-- اختر محلة المصدر --</option>
+                  {uniqueNeighborhoods.map(nh => (
+                    <option key={nh} value={nh}>{nh}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1 font-bold">إلى المحلة السكنية (الهدف)</label>
+                <select
+                  value={moveDestNh}
+                  onChange={(e) => setMoveDestNh(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-purple-200 text-xs text-purple-950 bg-[#FAF8FC] outline-none"
+                >
+                  <option value="">-- اختر محلة الهدف --</option>
+                  {uniqueNeighborhoods.map(nh => (
+                    <option key={nh} value={nh}>{nh}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={handleMoveFamiliesBulk}
+                disabled={!moveSourceNh || !moveDestNh || moveSourceNh === moveDestNh}
+                className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition-all disabled:opacity-50 cursor-pointer"
+              >
+                نقل كافة الأسر والتابعين فورياً
+              </button>
+            </div>
+
+            {/* Column 3: Delete Neighborhood */}
+            <div className="bg-white p-4 rounded-2xl border border-purple-100 space-y-3">
+              <h5 className="text-xs font-bold text-red-800 border-b border-red-50 pb-1.5 flex items-center gap-1">
+                <span>🗑️</span> حذف محلة سكنية بالكامل
+              </h5>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1 font-bold">اختر المحلة المراد حذفها</label>
+                <select
+                  value={selectedNhToDelete}
+                  onChange={(e) => setSelectedNhToDelete(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-red-200 text-xs text-red-950 bg-[#FFF8F8] outline-none"
+                >
+                  <option value="">-- اختر المحلة للحذف --</option>
+                  {uniqueNeighborhoods.map(nh => (
+                    <option key={nh} value={nh}>{nh}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1 font-bold">الخيار للأسر الموجودة في هذه المحلة</label>
+                <select
+                  value={deleteActionOption}
+                  onChange={(e) => setDeleteActionOption(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-red-200 text-xs text-red-950 bg-[#FFF8F8] outline-none"
+                >
+                  <option value="clear">تصفير محلتهم (تصبح غير محددة)</option>
+                  <option value="move">نقلهم إلى محلة أخرى...</option>
+                </select>
+              </div>
+              {deleteActionOption === 'move' && (
+                <div>
+                  <label className="block text-[10px] text-gray-500 mb-1 font-bold">المحلة البديلة لنقل الأسر إليها</label>
+                  <select
+                    value={deleteFallbackNh}
+                    onChange={(e) => setDeleteFallbackNh(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-purple-200 text-xs text-purple-950 bg-[#FAF8FC] outline-none"
+                  >
+                    <option value="">-- اختر محلة النقل البديلة --</option>
+                    {uniqueNeighborhoods.filter(nh => nh !== selectedNhToDelete).map(nh => (
+                      <option key={nh} value={nh}>{nh}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={handleDeleteNeighborhood}
+                disabled={!selectedNhToDelete || (deleteActionOption === 'move' && !deleteFallbackNh)}
+                className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition-all disabled:opacity-50 cursor-pointer"
+              >
+                حذف المحلة وتطبيق الإجراء المختار
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Edit Options Panel Drawer */}
+      {showBulkEditPanel && (
+        <div className="bg-[#FFFDF9] p-6 rounded-3xl border-2 border-[#A98467]/50 shadow-md space-y-4 animate-fadeIn">
+          <div className="flex items-center gap-3 border-b border-[#E2DED0] pb-3">
+            <span className="text-xl">🛠️</span>
+            <div>
+              <h4 className="font-extrabold text-xs sm:text-sm text-[#2D3A30]">التعديل الجماعي الذكي (ألقاب - جنس - محلة)</h4>
+              <p className="text-[10px] text-gray-500 text-right">
+                سيتم تطبيق القيم المدخلة أدناه على <strong className="text-[#A98467] font-black">{selectedFamilyIds.length}</strong> عائلات تم تحديدها من الجدول بالأسفل.
+                {selectedFamilyIds.length === 0 && (
+                  <span className="text-red-500 mr-1.5 font-bold block">(يرجى تحديد عائلة أو أكثر أولاً من جدول التعداد بالأسفل)</span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end text-right">
+            {/* 1. Bulk Surname Update */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold text-[#4A5D4E]">تعديل اللقب جماعياً</label>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5 justify-end">
+                  <label htmlFor="bulkIsNewSurname" className="text-[10px] text-[#7A8B7E] font-bold">كتابة لقب جديد</label>
+                  <input
+                    type="checkbox"
+                    id="bulkIsNewSurname"
+                    checked={bulkIsNewSurname}
+                    onChange={(e) => setBulkIsNewSurname(e.target.checked)}
+                    className="rounded text-[#4A5D4E] focus:ring-[#4A5D4E]"
+                  />
+                </div>
+                {bulkIsNewSurname ? (
+                  <input
+                    type="text"
+                    value={bulkCustomSurname}
+                    onChange={(e) => setBulkCustomSurname(e.target.value)}
+                    placeholder="اكتب اللقب الجديد..."
+                    className="w-full px-3 py-2 rounded-xl border border-[#E2DED0] text-xs bg-white text-[#3E4C41] outline-none text-right"
+                  />
+                ) : (
+                  <select
+                    value={bulkSelectedSurname}
+                    onChange={(e) => setBulkSelectedSurname(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E2DED0] text-xs bg-white text-[#3E4C41] text-right"
+                  >
+                    <option value="">-- اختر لقباً من قاعدة البيانات --</option>
+                    {uniqueSurnames.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Bulk Gender Update */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold text-[#4A5D4E]">تعديل الجنس جماعياً</label>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2 justify-end">
+                  <select
+                    value={bulkGenderTarget}
+                    onChange={(e) => setBulkGenderTarget(e.target.value as any)}
+                    className="px-2 py-0.5 rounded border border-[#E2DED0] text-[9px] bg-white text-[#7A8B7E] text-right"
+                  >
+                    <option value="all">كل الأفراد في الأسر</option>
+                    <option value="breadwinner">رب الأسرة فقط</option>
+                  </select>
+                </div>
+                <select
+                  value={bulkSelectedGender}
+                  onChange={(e) => setBulkSelectedGender(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl border border-[#E2DED0] text-xs bg-white text-[#3E4C41] text-right"
+                >
+                  <option value="">-- اختر الجنس للتعديل --</option>
+                  <option value="ذكر">ذكر</option>
+                  <option value="أنثى">أنثى</option>
+                </select>
+              </div>
+            </div>
+
+            {/* 3. Bulk Neighborhood/Village Update */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold text-[#4A5D4E]">تعديل المحلة جماعياً</label>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5 justify-end">
+                  <label htmlFor="bulkIsNewNeighborhood" className="text-[10px] text-[#7A8B7E] font-bold">كتابة محلة جديدة</label>
+                  <input
+                    type="checkbox"
+                    id="bulkIsNewNeighborhood"
+                    checked={bulkIsNewNeighborhood}
+                    onChange={(e) => setBulkIsNewNeighborhood(e.target.checked)}
+                    className="rounded text-[#4A5D4E] focus:ring-[#4A5D4E]"
+                  />
+                </div>
+                {bulkIsNewNeighborhood ? (
+                  <input
+                    type="text"
+                    value={bulkCustomNeighborhood}
+                    onChange={(e) => setBulkCustomNeighborhood(e.target.value)}
+                    placeholder="اكتب المحلة الجديدة..."
+                    className="w-full px-3 py-2 rounded-xl border border-[#E2DED0] text-xs bg-white text-[#3E4C41] outline-none text-right"
+                  />
+                ) : (
+                  <select
+                    value={bulkSelectedNeighborhood}
+                    onChange={(e) => setBulkSelectedNeighborhood(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E2DED0] text-xs bg-white text-[#3E4C41] text-right"
+                  >
+                    <option value="">-- اختر محلة من قاعدة البيانات --</option>
+                    {uniqueNeighborhoods.map(nh => (
+                      <option key={nh} value={nh}>{nh}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-3 border-t border-[#E2DED0]">
+            <button
+              onClick={() => {
+                setShowBulkEditPanel(false);
+                setBulkSelectedSurname('');
+                setBulkIsNewSurname(false);
+                setBulkCustomSurname('');
+                setBulkSelectedGender('');
+                setBulkSelectedNeighborhood('');
+                setBulkIsNewNeighborhood(false);
+                setBulkCustomNeighborhood('');
+              }}
+              className="bg-[#F4F1EA] hover:bg-[#E2DED0] text-[#7A8B7E] hover:text-[#2D3A30] px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              إلغاء التصفية
+            </button>
+            <button
+              onClick={handleUnifiedBulkSave}
+              disabled={selectedFamilyIds.length === 0}
+              className="bg-[#4A5D4E] hover:bg-[#3E4C41] text-[#FDFBF7] px-6 py-2 rounded-xl text-xs font-extrabold transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              تطبيق التعديلات وحفظ جماعي
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* لوحة تحكم الإدارة لـ سجل الأسر */}
-      {(isAdministrative || (currentUser?.role === 'super-admin' || currentUser?.role === 'admin' || currentUser?.permissions?.canAccessAdvancedImport === true)) ? (
+      {showImportSyncSection && ((isAdministrative || (currentUser?.role === 'super-admin' || currentUser?.role === 'admin' || currentUser?.permissions?.canAccessAdvancedImport === true)) ? (
         <div className="bg-gradient-to-br from-[#FDFBF7] to-[#F4F1EA] border-2 border-dashed border-[#4A5D4E]/40 p-6 rounded-3xl space-y-4 shadow-3xs animate-fadeIn">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#E2DED0] pb-3">
             <div className="flex items-center gap-2.5">
@@ -1118,393 +2100,13 @@ export default function FamilyRegister({
             </button>
           </div>
         </div>
-      )}
+      ))}
 
-      {/* إحصائية المحلات والعائلات (مستخرج تلقائياً) */}
-      <div className="bg-[#FDFBF7] rounded-3xl p-5 border border-[#E2DED0] shadow-3xs space-y-3">
-        <div className="flex items-center justify-between border-b border-[#E2DED0] pb-2">
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet className="w-5 h-5 text-[#4A5D4E]" />
-            <h4 className="font-extrabold text-xs sm:text-sm text-[#2D3A30]">
-              إحصائية المحلات والعائلات (ملخص التعداد التلقائي)
-            </h4>
-          </div>
-          <span className="text-[10px] bg-[#E9F0E0] border border-[#DDE5B6] px-2.5 py-1 rounded-lg font-bold text-[#4A5D4E]">
-            {neighborhoodSummary.length} محلات مسجلة
-          </span>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-          {/* جدول الإحصائيات المرتب */}
-          <div className="border border-[#F4F1EA] rounded-2xl overflow-hidden max-h-[220px] overflow-y-auto">
-            <table className="w-full text-right text-xs">
-              <thead className="bg-[#F4F1EA] text-[#7A8B7E] sticky top-0">
-                <tr>
-                  <th className="p-3 font-bold">المحلة</th>
-                  <th className="p-3 font-bold">إجمالي الأفراد</th>
-                  <th className="p-3 font-bold">عدد العائلات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#F4F1EA] bg-white">
-                {neighborhoodSummary.map((summary, idx) => (
-                  <tr key={idx} className="hover:bg-[#FDFBF7] transition-all">
-                    <td className="p-3 text-[#2D3A30] font-bold">{summary.name}</td>
-                    <td className="p-3 text-[#3E4C41] font-mono">{summary.totalMembers} فرد</td>
-                    <td className="p-3 text-[#4A5D4E] font-bold font-mono">{summary.familyCount} عائلة</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
 
-          {/* ملخص الإحصائيات السريع */}
-          <div className="bg-[#F4F1EA]/50 border border-[#E2DED0] rounded-2xl p-4 space-y-3">
-            <h5 className="font-bold text-[#2D3A30] text-xs">ملخص سريع للمرصد السكاني</h5>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-white p-3 rounded-xl border border-[#E2DED0]/60 space-y-1">
-                <span className="text-[10px] text-[#7A8B7E] block">إجمالي العائلات</span>
-                <span className="text-sm font-extrabold text-[#2D3A30] font-mono">
-                  {families.length} عائلة
-                </span>
-              </div>
-              <div className="bg-white p-3 rounded-xl border border-[#E2DED0]/60 space-y-1">
-                <span className="text-[10px] text-[#7A8B7E] block">إجمالي المواطنين</span>
-                <span className="text-sm font-extrabold text-[#4A5D4E] font-mono">
-                  {families.reduce((acc, f) => acc + f.members.length, 0)} فرد
-                </span>
-              </div>
-            </div>
-            <p className="text-[10px] text-[#7A8B7E] leading-relaxed">
-              * يتم رصد وتحليل هذه الأرقام فورياً بناءً على أي ملف يتم رفعه أو تحديثه بواسطة المشرف أو جلب البيانات من Google Sheets.
-            </p>
-          </div>
-        </div>
-      </div>
 
-      {/* Bulk Action Panel (Exclusive to Super Admin) */}
-      {isSuperAdminUser && (
-        <div className="bg-[#FFFDF9] p-4 rounded-2xl border-2 border-[#A98467]/40 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-md animate-fadeIn mb-4">
-          <div className="flex items-center gap-3">
-            <span className="text-xl">🛠️</span>
-            <div>
-              <h4 className="font-extrabold text-xs text-[#2D3A30]">تحديث جماعي للألقاب العائلية (المشرف العام)</h4>
-              <p className="text-[10px] text-gray-500">
-                تم تحديد <strong className="text-[#A98467] font-black">{selectedFamilyIds.length}</strong> عائلات لتغيير اللقب دفعة واحدة.
-                {selectedFamilyIds.length === 0 && (
-                  <span className="text-red-500 mr-1.5 font-bold">(يرجى تحديد عائلة أو أكثر من الجدول أدناه لتفعيل التعديل الجماعي)</span>
-                )}
-              </p>
-            </div>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold text-[#3E4C41]">اللقب الموحد السائد:</span>
-              <select
-                value={bulkSelectedSurname}
-                disabled={selectedFamilyIds.length === 0}
-                onChange={(e) => {
-                  setBulkSelectedSurname(e.target.value);
-                  if (e.target.value === '__new__') {
-                    setBulkIsNewSurname(true);
-                  } else {
-                    setBulkIsNewSurname(false);
-                  }
-                }}
-                className="px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-black outline-none focus:border-[#4A5D4E] disabled:bg-[#F4F1EA] disabled:text-gray-400 cursor-pointer"
-              >
-                <option value="">-- اختر اللقب الموحد --</option>
-                {uniqueSurnames.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-                <option value="__new__">➕ إضافة لقب جديد...</option>
-              </select>
-            </div>
 
-            {bulkIsNewSurname && selectedFamilyIds.length > 0 && (
-              <input
-                type="text"
-                value={bulkCustomSurname}
-                onChange={(e) => setBulkCustomSurname(e.target.value)}
-                placeholder="اكتب اللقب الجديد..."
-                className="px-2.5 py-1.5 rounded-lg border border-[#A98467] text-xs bg-white text-[#2D3A30] font-bold outline-none"
-              />
-            )}
-
-            <button
-              onClick={handleBulkSaveSurnames}
-              disabled={selectedFamilyIds.length === 0}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer border-0"
-            >
-              تحديث اللقب وحفظ جماعي
-            </button>
-            
-            {selectedFamilyIds.length > 0 && (
-              <button
-                onClick={() => {
-                  setSelectedFamilyIds([]);
-                  setBulkSelectedSurname('');
-                  setBulkIsNewSurname(false);
-                  setBulkCustomSurname('');
-                }}
-                className="text-[11px] text-red-600 hover:text-red-700 font-bold cursor-pointer bg-transparent border-0"
-              >
-                إلغاء التحديد
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Controls Card */}
-      <div className="bg-[#F4F1EA] rounded-3xl p-6 border border-[#E2DED0] shadow-sm space-y-4 mb-4">
-        {/* Top bar: search and main CTA */}
-        <div className="flex flex-col md:flex-row gap-3 justify-between items-stretch md:items-center">
-          <div className="flex flex-col sm:flex-row gap-2 flex-1 max-w-2xl">
-            <div className="relative flex-1">
-              <Search className="absolute right-3 top-2.5 text-[#7A8B7E] w-4 h-4" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ابحث عن عائلة، رب الأسرة، رقم هاتف أو كلمات دالة..."
-                className="w-full pl-3 pr-9 py-2 rounded-xl border border-[#E2DED0] bg-white text-xs text-[#3E4C41] focus:ring-2 focus:ring-[#4A5D4E]/20 focus:border-[#4A5D4E] transition-all outline-none"
-              />
-            </div>
-            
-            {/* Advanced Search Toggle Button */}
-            <button
-              onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-1.5 cursor-pointer ${
-                showAdvancedSearch 
-                  ? 'bg-[#4A5D4E] text-[#FDFBF7] border-[#4A5D4E]' 
-                  : 'bg-white text-[#3E4C41] border-[#E2DED0] hover:bg-[#FDFBF7]'
-              }`}
-            >
-              <Filter className="w-3.5 h-3.5" />
-              <span>بحث متقدم</span>
-              {showAdvancedSearch ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Advanced Search Panel */}
-        {showAdvancedSearch && (
-          <div className="bg-white/85 border border-[#E2DED0] rounded-2xl p-4 md:p-5 space-y-4 shadow-3xs transition-all">
-            <div className="flex items-center justify-between border-b border-[#F4F1EA] pb-2">
-              <h4 className="font-extrabold text-xs text-[#2D3A30]">
-                معايير البحث والفلترة المتقدمة (متعددة الخيارات)
-              </h4>
-              <button
-                onClick={() => {
-                  setAdvSearchGlobal('');
-                  setAdvSearchNeighborhood('الكل');
-                  setAdvSearchMinMembers('');
-                  setAdvSearchMaxMembers('');
-                  setAdvSearchResidence('الكل');
-                  setSearchQuery('');
-                }}
-                className="text-[10px] text-red-600 hover:text-red-700 font-bold flex items-center gap-1 cursor-pointer bg-transparent border-0"
-              >
-                <RefreshCw className="w-3 h-3" />
-                إعادة تعيين الكل
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {/* Unified Search Name / Phone / Surname */}
-              <div className="sm:col-span-2">
-                <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">بحث شامل (الاسم، اللقب، أو رقم الهاتف)</label>
-                <input
-                  type="text"
-                  value={advSearchGlobal}
-                  onChange={(e) => setAdvSearchGlobal(e.target.value)}
-                  placeholder="مثال: محمد، السقاف، 77..."
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-medium outline-none focus:border-[#4A5D4E]"
-                />
-              </div>
-
-              {/* Neighborhood / Locality */}
-              <div>
-                <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">المحلة / المنطقة</label>
-                <select
-                  value={advSearchNeighborhood}
-                  onChange={(e) => setAdvSearchNeighborhood(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-medium outline-none focus:border-[#4A5D4E]"
-                >
-                  <option value="الكل">جميع المحلات</option>
-                  {uniqueNeighborhoods.map(n => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Residence status (dynamically pulled from Sheet Column G) */}
-              <div className="relative">
-                <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">حالة الإقامة (العمود G)</label>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setIsResidenceDropdownOpen(!isResidenceDropdownOpen)}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-medium text-right flex justify-between items-center cursor-pointer min-h-[32px]"
-                  >
-                    <span>{advSearchResidence === 'الكل' ? 'كل حالات الإقامة' : advSearchResidence}</span>
-                    <ChevronDown className="w-3.5 h-3.5 text-[#7A8B7E]" />
-                  </button>
-
-                  {isResidenceDropdownOpen && (
-                    <div className="absolute z-50 mt-1 w-full bg-white border border-[#E2DED0] rounded-xl shadow-lg p-2 space-y-2 max-h-56 overflow-y-auto">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={residenceSearchQuery}
-                          onChange={(e) => setResidenceSearchQuery(e.target.value)}
-                          placeholder="ابحث عن حالة الإقامة..."
-                          className="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] outline-none"
-                        />
-                        <Search className="w-3.5 h-3.5 text-[#7A8B7E] absolute left-2.5 top-2.5" />
-                      </div>
-                      <div className="divide-y divide-[#F4F1EA] max-h-36 overflow-y-auto font-sans">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAdvSearchResidence('الكل');
-                            setIsResidenceDropdownOpen(false);
-                            setResidenceSearchQuery('');
-                          }}
-                          className={`w-full text-right px-2.5 py-1.5 text-xs hover:bg-[#F4F1EA] rounded-md transition-all flex items-center justify-between cursor-pointer ${
-                            advSearchResidence === 'الكل' ? 'bg-[#E9F0E0] text-[#4A5D4E] font-bold' : 'text-[#3E4C41]'
-                          }`}
-                        >
-                          <span>كل حالات الإقامة</span>
-                        </button>
-                        {residenceOptions
-                          .filter(opt => opt.toLowerCase().includes(residenceSearchQuery.toLowerCase()))
-                          .map(opt => (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => {
-                                setAdvSearchResidence(opt);
-                                setIsResidenceDropdownOpen(false);
-                                setResidenceSearchQuery('');
-                              }}
-                              className={`w-full text-right px-2.5 py-1.5 text-xs hover:bg-[#F4F1EA] rounded-md transition-all flex items-center justify-between cursor-pointer ${
-                                advSearchResidence === opt ? 'bg-[#E9F0E0] text-[#4A5D4E] font-bold' : 'text-[#3E4C41]'
-                              }`}
-                            >
-                              <span>{opt}</span>
-                            </button>
-                          ))
-                        }
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Family members count range */}
-              <div className="sm:col-span-2">
-                <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">عدد أفراد الأسرة (نطاق)</label>
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="number"
-                      min="1"
-                      value={advSearchMinMembers === '' ? '' : advSearchMinMembers}
-                      onChange={(e) => setAdvSearchMinMembers(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                      placeholder="الحد الأدنى للأفراد"
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-medium outline-none focus:border-[#4A5D4E]"
-                    />
-                    <span className="absolute left-2.5 top-1.5 text-[9px] text-[#7A8B7E] font-bold">كحد أدنى</span>
-                  </div>
-                  <span className="text-[#7A8B7E] text-xs font-bold">إلى</span>
-                  <div className="relative flex-1">
-                    <input
-                      type="number"
-                      min="1"
-                      value={advSearchMaxMembers === '' ? '' : advSearchMaxMembers}
-                      onChange={(e) => setAdvSearchMaxMembers(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                      placeholder="الحد الأقصى للأفراد"
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-medium outline-none focus:border-[#4A5D4E]"
-                    />
-                    <span className="absolute left-2.5 top-1.5 text-[9px] text-[#7A8B7E] font-bold">كحد أقصى</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Extra visual indicators / info */}
-              <div className="flex items-end justify-start text-[10px] text-[#7A8B7E] leading-tight pb-1">
-                <div>
-                  <span className="font-bold text-[#4A5D4E]">نتائج البحث الحالي:</span> {filteredFamilies.length} عائلة مستوفية للمعايير.
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Detailed Filtering Controls */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 border-t border-[#E2DED0] pt-3">
-          {/* Neighborhood filter */}
-          <div>
-            <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">المحلة</label>
-            <select
-              value={selectedNeighborhood}
-              onChange={(e) => setSelectedNeighborhood(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-medium"
-            >
-              <option value="الكل">جميع المحلات</option>
-              {uniqueNeighborhoods.map(n => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Support status filter */}
-          <div>
-            <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">حالة الاستحقاق</label>
-            <select
-              value={selectedSupportStatus}
-              onChange={(e) => setSelectedSupportStatus(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-medium"
-            >
-              <option value="الكل">جميع الحالات</option>
-              <option value="مستحق للدعم">مستحق للدعم</option>
-              <option value="تحت الدراسة">تحت الدراسة</option>
-              <option value="غير مستحق / مكتفي">مكتفي ذاتياً</option>
-            </select>
-          </div>
-
-          {/* Residence status filter */}
-          <div>
-            <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">حالة الإقامة</label>
-            <select
-              value={selectedResidence}
-              onChange={(e) => setSelectedResidence(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-medium"
-            >
-              <option value="الكل">جميع حالات الإقامة</option>
-              {residenceOptions.map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Special health needs filter */}
-          <div>
-            <label className="block text-[10px] text-[#7A8B7E] mb-1 font-bold">الحالة الصحية لأفراد الأسرة</label>
-            <select
-              value={selectedHealthFilter}
-              onChange={(e) => setSelectedHealthFilter(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-white text-[#3E4C41] font-medium"
-            >
-              <option value="الكل">جميع الحالات الطبية</option>
-              <option value="ذوي احتياجات خاصة">أسر بها ذوي احتياجات خاصة</option>
-              <option value="مرض مزمن">أسر بها مرضى مزمنين</option>
-            </select>
-          </div>
-        </div>
-      </div>
 
       {/* Filter Stats Ribbon */}
       <div className="bg-[#FDFBF7] p-3 rounded-2xl border border-[#E2DED0] flex items-center justify-between text-xs text-[#3E4C41] px-4 shadow-sm mb-4">
@@ -1526,7 +2128,7 @@ export default function FamilyRegister({
               <thead className="bg-[#FDFBF7] text-[#7A8B7E] font-bold border-b border-[#E2DED0] sticky top-0 z-10 shadow-xs">
                 <tr>
                   <th className="p-4 w-8"></th>
-                  {isSuperAdminUser && (
+                  {canEditFamily && (
                     <th className="p-4 w-10 text-center">
                       <input
                         type="checkbox"
@@ -1544,34 +2146,34 @@ export default function FamilyRegister({
                     </th>
                   )}
                   <th className="p-4">اسم رب الأسرة</th>
-                  <th className="p-4">رقم الهاتف</th>
-                  <th className="p-4 cursor-pointer hover:bg-[#F4F1EA] transition-all" onClick={() => handleSort('familyName')}>
+                  <th className="p-4 hidden md:table-cell">رقم الهاتف</th>
+                  <th className="p-4 cursor-pointer hover:bg-[#F4F1EA] transition-all hidden sm:table-cell" onClick={() => handleSort('familyName')}>
                     <div className="flex items-center gap-1">
                       <span>اللقب</span>
                       <ArrowUpDown className="w-3 h-3 text-[#7A8B7E]" />
                     </div>
                   </th>
-                  <th className="p-4 cursor-pointer hover:bg-[#F4F1EA] transition-all" onClick={() => handleSort('neighborhood')}>
+                  <th className="p-4 cursor-pointer hover:bg-[#F4F1EA] transition-all hidden sm:table-cell" onClick={() => handleSort('neighborhood')}>
                     <div className="flex items-center gap-1">
                       <span>المحلة</span>
                       <ArrowUpDown className="w-3 h-3 text-[#7A8B7E]" />
                     </div>
                   </th>
-                  <th className="p-4">الإقامة</th>
-                  <th className="p-4 cursor-pointer hover:bg-[#F4F1EA] transition-all" onClick={() => handleSort('membersCount')}>
+                  <th className="p-4 hidden lg:table-cell">الإقامة</th>
+                  <th className="p-4 cursor-pointer hover:bg-[#F4F1EA] transition-all hidden md:table-cell" onClick={() => handleSort('membersCount')}>
                     <div className="flex items-center gap-1">
                       <span>عدد الأفراد</span>
                       <ArrowUpDown className="w-3 h-3 text-[#7A8B7E]" />
                     </div>
                   </th>
-                  <th className="p-4">حالة الاستحقاق والدخل</th>
-                  <th className="p-4 cursor-pointer hover:bg-[#F4F1EA] transition-all" onClick={() => handleSort('registeredAt')}>
+                  <th className="p-4 hidden md:table-cell">حالة الاستحقاق والدخل</th>
+                  <th className="p-4 cursor-pointer hover:bg-[#F4F1EA] transition-all hidden xl:table-cell" onClick={() => handleSort('registeredAt')}>
                     <div className="flex items-center gap-1">
                       <span>تاريخ التسجيل</span>
                       <ArrowUpDown className="w-3 h-3 text-[#7A8B7E]" />
                     </div>
                   </th>
-                  <th className="p-4 text-center">إجراءات</th>
+                  <th className="p-4 text-center hidden md:table-cell">إجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F4F1EA]">
@@ -1583,19 +2185,24 @@ export default function FamilyRegister({
 
                   return (
                     <React.Fragment key={family.id}>
-                      {/* Main family row */}
-                      <tr className={`hover:bg-[#FDFBF7] transition-all ${isExpanded ? 'bg-[#F4F1EA]/40' : ''}`}>
+                      <tr 
+                        className={`hover:bg-[#FDFBF7] transition-all cursor-pointer ${isExpanded ? 'bg-[#F4F1EA]/40' : ''}`}
+                        onClick={() => toggleExpandFamily(family.id)}
+                      >
                         <td className="p-4 text-center">
                           <button
-                            onClick={() => toggleExpandFamily(family.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpandFamily(family.id);
+                            }}
                             className="p-1 rounded-lg hover:bg-[#F4F1EA] transition-all text-[#7A8B7E] hover:text-[#4A5D4E]"
                           >
                             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                           </button>
                         </td>
 
-                        {isSuperAdminUser && (
-                          <td className="p-4 text-center">
+                        {canEditFamily && (
+                          <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               checked={selectedFamilyIds.includes(family.id)}
@@ -1612,23 +2219,53 @@ export default function FamilyRegister({
                         )}
 
                         <td className="p-4">
-                          <div className="font-medium text-[#3E4C41]">{parsedBW.name}</div>
+                          <div className="flex flex-col gap-1 text-right">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-extrabold text-xs sm:text-sm text-[#2D3A30]">{parsedBW.name}</span>
+                              
+                              {/* Surname as beautiful badge next to name on mobile */}
+                              <span className="sm:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200/80 text-amber-950 font-black text-[10px]">
+                                🛡️ {family.familyName}
+                              </span>
+
+                              {/* Members count badge on mobile */}
+                              <span className="md:hidden inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-[#E9F0E0] border border-[#DDE5B6] text-[#4A5D4E] font-extrabold text-[10px]">
+                                👥 {family.members.length} فرد
+                              </span>
+
+                              {/* Special conditions flags on mobile */}
+                              {hasSpecialNeeds && (
+                                <span className="md:hidden inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-50 border border-rose-100 text-rose-800 font-bold text-[9px]">
+                                  ♿ احتياجات خاصة
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Neighborhood pin shown as subtitle on mobile */}
+                            <div className="sm:hidden flex items-center gap-1 text-[#7A8B7E] text-[11px] font-bold">
+                              <MapPin className="w-3 shrink-0 text-[#A98467]" />
+                              <span>{family.neighborhood}</span>
+                              {family.residence && (
+                                <span className="text-[10px] text-gray-400 font-medium mr-1">• {family.residence}</span>
+                              )}
+                            </div>
+                          </div>
                         </td>
 
-                        <td className="p-4">
+                        <td className="p-4 hidden md:table-cell">
                           <div className="flex items-center gap-1 text-[#7A8B7E] text-[11px]">
                             <Phone className="w-3 h-3 text-[#7A8B7E] shrink-0" />
                             <span className="font-mono">{parsedBW.phone || 'غير مدرج'}</span>
                           </div>
                         </td>
 
-                        <td className="p-4">
-                          <div className="font-bold text-[#2D3A30] text-sm">
-                            {family.familyName}
-                          </div>
+                        <td className="p-4 hidden sm:table-cell">
+                          <span className="inline-flex items-center justify-center px-3 py-1 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-950 font-extrabold text-xs shadow-3xs tracking-wider">
+                            🛡️ {family.familyName}
+                          </span>
                         </td>
 
-                        <td className="p-4">
+                        <td className="p-4 hidden sm:table-cell">
                           <div className="flex items-center gap-1 text-[#2D3A30] font-medium">
                             <MapPin className="w-3 h-3 text-[#7A8B7E] shrink-0" />
                             <span>{family.neighborhood}</span>
@@ -1640,7 +2277,7 @@ export default function FamilyRegister({
                           )}
                         </td>
 
-                        <td className="p-4">
+                        <td className="p-4 hidden lg:table-cell">
                           <span className={`inline-block px-2.5 py-0.5 rounded-lg text-[10.5px] font-bold border ${
                             family.residence?.includes('نزوح') || family.residence?.includes('مؤقت') || family.residence?.includes('نازح')
                               ? 'bg-amber-50 text-amber-700 border-amber-200/60'
@@ -1650,7 +2287,7 @@ export default function FamilyRegister({
                           </span>
                         </td>
 
-                        <td className="p-4">
+                        <td className="p-4 hidden md:table-cell">
                           <div className="flex items-center gap-1.5">
                             <span className="font-extrabold text-[#2D3A30] text-sm">{family.members.length}</span>
                             <span className="text-[#7A8B7E] text-[10px]">أفراد</span>
@@ -1671,7 +2308,7 @@ export default function FamilyRegister({
                           </div>
                         </td>
 
-                        <td className="p-4 space-y-1">
+                        <td className="p-4 space-y-1 hidden md:table-cell">
                           <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                             family.supportStatus === 'مستحق للدعم' 
                               ? 'bg-[#FFF5EB] text-[#A98467] border-[#E2DED0]/50' 
@@ -1684,14 +2321,14 @@ export default function FamilyRegister({
                           <div className="text-[10px] text-[#7A8B7E]">الدخل: {family.monthlyIncome}</div>
                         </td>
 
-                        <td className="p-4 text-[#7A8B7E] font-mono text-[11px]">
+                        <td className="p-4 text-[#7A8B7E] font-mono text-[11px] hidden xl:table-cell">
                           <div className="flex items-center gap-1">
                             <Calendar className="w-3.5 h-3.5" />
                             <span>{family.registeredAt}</span>
                           </div>
                         </td>
 
-                        <td className="p-4">
+                        <td className="p-4 text-center hidden md:table-cell" onClick={(e) => e.stopPropagation()}>
                           <div className="flex gap-1.5 justify-center">
                             <button
                               onClick={() => onLocateOnMap(family)}
@@ -1725,46 +2362,124 @@ export default function FamilyRegister({
                       {/* Nested Expanded Family Details */}
                       {isExpanded && (
                         <tr>
-                          <td colSpan={isSuperAdminUser ? 10 : 9} className="bg-[#F9F8F4] p-5 border-y border-[#E2DED0]">
+                          <td colSpan={canEditFamily ? 11 : 10} className="bg-[#F9F8F4] p-4 sm:p-5 border-y border-[#E2DED0]" onClick={(e) => e.stopPropagation()}>
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                              {/* Left section: Info metadata */}
-                              <div className="space-y-3">
-                                <h5 className="font-bold text-[#2D3A30] text-xs border-b border-[#E2DED0]/60 pb-1.5 flex items-center gap-1.5">
-                                  <Users className="w-4 h-4 text-[#4A5D4E]" />
-                                  <span>تفاصيل المعيشة والسكن</span>
+                              {/* Left section: Info metadata & interactive cards */}
+                              <div className="space-y-4 text-right">
+                                <h5 className="font-extrabold text-[#2D3A30] text-xs border-b border-[#E2DED0]/60 pb-1.5 flex items-center gap-1.5">
+                                  <Sparkles className="w-4 h-4 text-[#A98467]" />
+                                  <span>بطاقات المعلومات السريعة والتحكم</span>
                                 </h5>
-                                <div className="bg-white p-3.5 rounded-xl border border-[#E2DED0] space-y-2 text-xs">
-                                  <div className="flex justify-between">
-                                    <span className="text-[#7A8B7E]">نوع المسكن والمأوى:</span>
-                                    <span className="font-semibold text-[#3E4C41]">{family.housingType}</span>
+
+                                {/* Card 1: الدعم والاستحقاق والمسكن */}
+                                <div className="bg-white p-4 rounded-2xl border border-[#E2DED0] shadow-2xs space-y-3">
+                                  <div className="flex justify-between items-center border-b border-[#F4F1EA] pb-2">
+                                    <span className="font-extrabold text-xs text-[#2D3A30]">الدعم والمسكن</span>
+                                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                                      family.supportStatus === 'مستحق للدعم' 
+                                        ? 'bg-[#FFF5EB] text-[#A98467] border-[#E2DED0]/50 font-black' 
+                                        : family.supportStatus === 'تحت الدراسة'
+                                        ? 'bg-[#F4F1EA] text-[#7A8B7E] border-[#E2DED0]/50'
+                                        : 'bg-[#E9F0E0] text-[#4A5D4E] border-[#DDE5B6] font-black'
+                                    }`}>
+                                      {family.supportStatus}
+                                    </span>
                                   </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-[#7A8B7E]">حالة الإقامة الفعلية:</span>
-                                    <span className="font-semibold text-emerald-700">{family.residence || 'دائمة'}</span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-[#7A8B7E]">فئة الدخل المالي للأسرة:</span>
-                                    <span className="font-semibold text-[#3E4C41]">{family.monthlyIncome}</span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-[#7A8B7E]">تاريخ التسجيل بالمرصد السكاني:</span>
-                                    <span className="font-mono text-[#3E4C41]">{family.registeredAt}</span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-[#7A8B7E]">إحداثيات الموقع المسجل:</span>
-                                    <span className="font-mono text-[#3E4C41]">({family.latitude}%, {family.longitude}%)</span>
+                                  <div className="space-y-2 text-xs">
+                                    <div className="flex justify-between">
+                                      <span className="text-[#7A8B7E]">نوع المسكن والمأوى:</span>
+                                      <span className="font-bold text-[#3E4C41]">{family.housingType}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-[#7A8B7E]">فئة الدخل المالي:</span>
+                                      <span className="font-bold text-[#3E4C41]">{family.monthlyIncome}</span>
+                                    </div>
+                                    {family.notes && (
+                                      <div className="bg-[#FFF5EB] border border-[#E2DED0]/50 p-2.5 rounded-xl text-[11px] text-[#A98467] mt-2 space-y-1 text-right">
+                                        <span className="font-bold block text-[#2D3A30]">البحث الاجتماعي:</span>
+                                        <p className="leading-relaxed font-semibold">{family.notes}</p>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                                {family.notes && (
-                                  <div className="bg-[#FFF5EB] border border-[#E2DED0]/50 p-3 rounded-xl text-xs text-[#A98467] space-y-1">
-                                    <span className="font-bold block text-[#2D3A30]">ملاحظات البحث الاجتماعي:</span>
-                                    <p className="leading-relaxed">{family.notes}</p>
+
+                                {/* Card 2: الإقامة وتفاصيل التواصل */}
+                                <div className="bg-white p-4 rounded-2xl border border-[#E2DED0] shadow-2xs space-y-3">
+                                  <div className="flex justify-between items-center border-b border-[#F4F1EA] pb-2">
+                                    <span className="font-extrabold text-xs text-[#2D3A30]">الإقامة والتواصل</span>
+                                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                                      family.residence?.includes('نزوح') || family.residence?.includes('مؤقت') || family.residence?.includes('نازح')
+                                        ? 'bg-amber-50 text-amber-700 border-amber-200/60'
+                                        : 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
+                                    }`}>
+                                      {family.residence || 'إقامة دائمة'}
+                                    </span>
                                   </div>
-                                )}
+                                  <div className="space-y-2 text-xs">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-[#7A8B7E]">رقم الهاتف:</span>
+                                      {parsedBW.phone ? (
+                                        <a href={`tel:${parsedBW.phone}`} className="font-mono font-black text-blue-600 hover:underline flex items-center gap-1">
+                                          <Phone className="w-3 h-3 text-[#7A8B7E]" />
+                                          <span>{parsedBW.phone}</span>
+                                        </a>
+                                      ) : (
+                                        <span className="text-gray-400 font-medium">غير مسجل</span>
+                                      )}
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-[#7A8B7E]">المحلة والموقع:</span>
+                                      <span className="font-bold text-[#4A5D4E]">{family.neighborhood}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-[#7A8B7E]">تاريخ التسجيل:</span>
+                                      <span className="font-mono text-[#3E4C41]">{family.registeredAt}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-[#7A8B7E]">الإحداثيات:</span>
+                                      <span className="font-mono text-gray-500">({family.latitude}%, {family.longitude}%)</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Card 3: أزرار التحكم والخرائط (مريحة للجوال واللمس) */}
+                                <div className="bg-white p-4 rounded-2xl border border-[#E2DED0] shadow-2xs space-y-3">
+                                  <span className="font-extrabold text-xs text-[#2D3A30] block border-b border-[#F4F1EA] pb-2">خيارات التحكم المباشر</span>
+                                  <div className="grid grid-cols-3 gap-2">
+                                    <button
+                                      onClick={() => onLocateOnMap(family)}
+                                      className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-slate-200 hover:bg-[#F4F1EA] text-[#4A5D4E] transition-all text-[10px] font-extrabold gap-1 cursor-pointer hover:scale-[1.02]"
+                                      title="تحديد الموقع الجغرافي على الخريطة"
+                                    >
+                                      <MapPin className="w-4 h-4 text-[#4A5D4E]" />
+                                      <span>الخريطة</span>
+                                    </button>
+                                    {canEditFamily && (
+                                      <button
+                                        onClick={() => onEditFamily(family)}
+                                        className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-slate-200 hover:bg-[#F4F1EA] text-amber-800 transition-all text-[10px] font-extrabold gap-1 cursor-pointer hover:scale-[1.02]"
+                                        title="تعديل بيانات العائلة يدوياً"
+                                      >
+                                        <Edit2 className="w-4 h-4 text-amber-800" />
+                                        <span>تعديل</span>
+                                      </button>
+                                    )}
+                                    {canWriteFamilies && (
+                                      <button
+                                        onClick={() => onDeleteFamily(family.id)}
+                                        className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-slate-200 hover:bg-[#F4F1EA] text-red-600 transition-all text-[10px] font-extrabold gap-1 cursor-pointer hover:scale-[1.02]"
+                                        title="حذف العائلة والمواطنين التابعين لها نهائياً"
+                                      >
+                                        <Trash2 className="w-4 h-4 text-red-600" />
+                                        <span>حذف</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
 
                               {/* Right section: full family members table (Col 2 & 3) */}
-                              <div className="lg:col-span-2 space-y-3">
+                              <div className="lg:col-span-2 space-y-3 text-right">
                                 <h5 className="font-bold text-[#2D3A30] text-xs border-b border-[#E2DED0]/60 pb-1.5">
                                   قائمة الأفراد بالتفصيل ({family.members.length} فرد)
                                 </h5>
@@ -1775,6 +2490,7 @@ export default function FamilyRegister({
                                       <thead className="bg-[#FDFBF7] text-[#7A8B7E]">
                                         <tr>
                                           <th className="p-2">الاسم</th>
+                                          <th className="p-2">الرقم الوطني</th>
                                           <th className="p-2">العلاقة</th>
                                           <th className="p-2">الجنس / السن</th>
                                           <th className="p-2">التعليم</th>
@@ -1786,6 +2502,7 @@ export default function FamilyRegister({
                                         {family.members.map((m) => (
                                           <tr key={m.id} className="hover:bg-[#FDFBF7] transition-all">
                                             <td className="p-2 font-semibold text-[#2D3A30]">{m.name}</td>
+                                            <td className="p-2 font-mono text-[#7A8B7E]">{m.nationalId || '-'}</td>
                                             <td className="p-2">
                                               <span className={`px-1.5 py-0.2 rounded text-[9px] border ${
                                                 m.relationship === 'عائل' ? 'bg-[#E9F0E0] text-[#4A5D4E] border-[#DDE5B6] font-bold' : 'bg-[#F4F1EA] text-[#7A8B7E] border-[#E2DED0]/40'
@@ -1838,6 +2555,9 @@ export default function FamilyRegister({
             <button
               onClick={() => {
                 setSearchQuery('');
+                setTopSearchName('');
+                setTopSearchNationalId('');
+                setTopSearchVillage('');
                 setSelectedNeighborhood('الكل');
                 setSelectedSupportStatus('الكل');
                 setSelectedResidence('الكل');
@@ -1909,6 +2629,67 @@ export default function FamilyRegister({
           </div>
         </div>
       )}
+
+      {/* ملخص التعداد التلقائي للمحلات والعائلات في نهاية الصفحة تماماً */}
+      <div className="bg-[#FDFBF7] rounded-3xl p-5 border border-[#E2DED0] shadow-sm space-y-3 mt-6">
+        <div className="flex items-center justify-between border-b border-[#E2DED0] pb-2">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="w-5 h-5 text-[#4A5D4E]" />
+            <h4 className="font-extrabold text-xs sm:text-sm text-[#2D3A30]">
+              ملخص التعداد التلقائي للمحلات والعائلات (حساب التوزيع الفوري)
+            </h4>
+          </div>
+          <span className="text-[10px] bg-[#E9F0E0] border border-[#DDE5B6] px-2.5 py-1 rounded-lg font-bold text-[#4A5D4E]">
+            {neighborhoodSummary.length} محلات مرصودة
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+          {/* جدول الإحصائيات المرتب */}
+          <div className="border border-[#F4F1EA] rounded-2xl overflow-hidden max-h-[220px] overflow-y-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-[#F4F1EA] text-[#7A8B7E] sticky top-0">
+                <tr>
+                  <th className="p-3 font-bold">المحلة</th>
+                  <th className="p-3 font-bold">إجمالي الأفراد</th>
+                  <th className="p-3 font-bold">عدد العائلات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#F4F1EA] bg-white">
+                {neighborhoodSummary.map((summary, idx) => (
+                  <tr key={idx} className="hover:bg-[#FDFBF7] transition-all">
+                    <td className="p-3 text-[#2D3A30] font-bold">{summary.name}</td>
+                    <td className="p-3 text-[#3E4C41] font-mono">{summary.totalMembers} فرد</td>
+                    <td className="p-3 text-[#4A5D4E] font-bold font-mono">{summary.familyCount} عائلة</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ملخص الإحصائيات السريع */}
+          <div className="bg-[#F4F1EA]/50 border border-[#E2DED0] rounded-2xl p-4 space-y-3">
+            <h5 className="font-bold text-[#2D3A30] text-xs">ملخص سريع للمرصد السكاني</h5>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-white p-3 rounded-xl border border-[#E2DED0]/60 space-y-1">
+                <span className="text-[10px] text-[#7A8B7E] block">إجمالي العائلات بالقرية</span>
+                <span className="text-sm font-extrabold text-[#2D3A30] font-mono">
+                  {families.length} عائلة
+                </span>
+              </div>
+              <div className="bg-white p-3 rounded-xl border border-[#E2DED0]/60 space-y-1">
+                <span className="text-[10px] text-[#7A8B7E] block">إجمالي المواطنين المرصودين</span>
+                <span className="text-sm font-extrabold text-[#4A5D4E] font-mono">
+                  {families.reduce((acc, f) => acc + f.members.length, 0)} فرد
+                </span>
+              </div>
+            </div>
+            <p className="text-[10px] text-[#7A8B7E] leading-relaxed">
+              * يتم رصد وتحليل هذه الأرقام فورياً بناءً على أي ملف يتم رفعته أو تحديثه بواسطة المشرف أو جلب البيانات من Google Sheets.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

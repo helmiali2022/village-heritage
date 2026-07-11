@@ -60,7 +60,9 @@ export default function StatsReports({ families }: StatsReportsProps) {
     let actualBirths: Record<number, number> = {};
     last5Years.forEach(y => actualBirths[y] = 0);
     
-    families.forEach(f => {
+    const realFams = families.filter(f => f.breadwinnerName !== 'الإجمالي' && f.familyName !== 'الإجمالي');
+    
+    realFams.forEach(f => {
       f.members.forEach(m => {
         const birthYear = currentYear - m.age;
         if (last5Years.includes(birthYear)) {
@@ -107,7 +109,9 @@ export default function StatsReports({ families }: StatsReportsProps) {
     const averageNaturalIncrease = (totalBirthsSum - totalDeathsSum) / 5;
 
     // Estimate cumulative growth trend (starting from actual real total population length)
-    let currentPop = families.reduce((acc, curr) => acc + curr.members.length, 0);
+    const baseCount = realFams.reduce((acc, curr) => acc + curr.members.length, 0);
+    const currentPop = baseCount;
+
     const growthTrend = timeline.map(item => {
       // For the past, we calculate backwards or just use the current actual as the final point,
       // but let's just make it a trend line ending at currentPop.
@@ -160,8 +164,23 @@ export default function StatsReports({ families }: StatsReportsProps) {
     setCustomEvents(prev => prev.filter(evt => evt.id !== id));
   };
 
-  // Calculate deep educational indicators
+  // Calculate deep educational indicators and geographic/demographic metrics
   const stats = useMemo(() => {
+    // Inside/Outside classifications helper
+    const insideNeighborhoods = [
+      'الاكمة', 'البقير', 'الدمنة', 'الرميمية', 'الزيلة', 'الزيله', 
+      'الصفا', 'الصفاء', 'العنين', 'القحفة', 'المجزع', 'المعقرة', 'الهقم'
+    ];
+
+    const isInsideVillage = (fam: Family) => {
+      if (fam.residence === 'داخل القرية') return true;
+      if (fam.residence === 'خارج القرية') return false;
+      return insideNeighborhoods.includes(fam.neighborhood) || insideNeighborhoods.includes(fam.residence || '');
+    };
+
+    // Filter out aggregate 'الإجمالي' family to prevent double counting
+    const realFamilies = families.filter(f => f.breadwinnerName !== 'الإجمالي' && f.familyName !== 'الإجمالي');
+
     let totalMembersCount = 0;
     let illiterateCount = 0;
     let universityCount = 0;
@@ -176,7 +195,29 @@ export default function StatsReports({ families }: StatsReportsProps) {
     let needyFamiliesList: Family[] = [];
     let unemployedMembersList: { member: Member; family: Family }[] = [];
 
-    families.forEach(f => {
+    let insideFamiliesCount = 0;
+    let insideDependentsCount = 0;
+    let insideTotalPopulation = 0;
+
+    let outsideFamiliesCount = 0;
+    let outsideDependentsCount = 0;
+    let outsideTotalPopulation = 0;
+
+    let maleCount = 0;
+    let femaleCount = 0;
+
+    realFamilies.forEach(f => {
+      const isInside = isInsideVillage(f);
+      if (isInside) {
+        insideFamiliesCount++;
+        insideDependentsCount += Math.max(0, f.members.length - 1);
+        insideTotalPopulation += f.members.length;
+      } else {
+        outsideFamiliesCount++;
+        outsideDependentsCount += Math.max(0, f.members.length - 1);
+        outsideTotalPopulation += f.members.length;
+      }
+
       if (f.supportStatus === 'مستحق للدعم') {
         needyFamiliesList.push(f);
       }
@@ -208,8 +249,24 @@ export default function StatsReports({ families }: StatsReportsProps) {
         } else if (m.healthStatus === 'مرض مزمن') {
           chronicDiseaseMembers.push({ member: m, family: f });
         }
+
+        // Count genders
+        if (m.gender === 'ذكر') {
+          maleCount++;
+        } else if (m.gender === 'أنثى') {
+          femaleCount++;
+        }
       });
     });
+
+    const finalInsideTotal = insideTotalPopulation;
+    const finalOutsideTotal = outsideTotalPopulation;
+
+    const finalInsideFamilies = insideFamiliesCount;
+    const finalInsideDependents = insideDependentsCount;
+
+    const finalOutsideFamilies = outsideFamiliesCount;
+    const finalOutsideDependents = outsideDependentsCount;
 
     const illiteracyRate = totalMembersCount ? ((illiterateCount / totalMembersCount) * 100).toFixed(1) : '0';
     const higherEducationRate = totalMembersCount ? (((universityCount + postGradCount) / totalMembersCount) * 100).toFixed(1) : '0';
@@ -222,7 +279,16 @@ export default function StatsReports({ families }: StatsReportsProps) {
       specialNeedsMembers,
       chronicDiseaseMembers,
       needyFamiliesList,
-      unemployedMembersList
+      unemployedMembersList,
+      insideFamiliesCount: finalInsideFamilies,
+      insideDependentsCount: finalInsideDependents,
+      insideTotalPopulation: finalInsideTotal,
+      outsideFamiliesCount: finalOutsideFamilies,
+      outsideDependentsCount: finalOutsideDependents,
+      outsideTotalPopulation: finalOutsideTotal,
+      maleCount,
+      femaleCount,
+      totalPopulation: finalInsideTotal + finalOutsideTotal
     };
   }, [families]);
 
@@ -270,10 +336,11 @@ export default function StatsReports({ families }: StatsReportsProps) {
           col6: item.member.education,
           col7: item.member.notes || 'يبحث عن عمل مستقر'
         }));
-      case 'education':
+      case 'education': {
         // List members with higher education
         const list: any[] = [];
-        families.forEach(f => {
+        const realFams = families.filter(f => f.breadwinnerName !== 'الإجمالي' && f.familyName !== 'الإجمالي');
+        realFams.forEach(f => {
           f.members.forEach(m => {
             if (m.education === 'جامعي' || m.education === 'دراسات عليا') {
               list.push({
@@ -289,9 +356,11 @@ export default function StatsReports({ families }: StatsReportsProps) {
           });
         });
         return list;
+      }
       case 'surnames': {
         const surnameMap: { [key: string]: { familiesCount: number; totalMembers: number; familiesList: string[]; needyCount: number } } = {};
-        families.forEach(f => {
+        const realFams = families.filter(f => f.breadwinnerName !== 'الإجمالي' && f.familyName !== 'الإجمالي');
+        realFams.forEach(f => {
           const s = f.familyName?.trim() || 'بدون لقب';
           if (!surnameMap[s]) {
             surnameMap[s] = { familiesCount: 0, totalMembers: 0, familiesList: [], needyCount: 0 };
@@ -307,7 +376,7 @@ export default function StatsReports({ families }: StatsReportsProps) {
           }
         });
 
-        const totalPopCount = families.reduce((acc, curr) => acc + curr.members.length, 0);
+        const totalPopCount = realFams.reduce((acc, curr) => acc + curr.members.length, 0);
 
         return Object.entries(surnameMap)
           .sort((a, b) => b[1].totalMembers - a[1].totalMembers)
@@ -372,6 +441,148 @@ export default function StatsReports({ families }: StatsReportsProps) {
 
   return (
     <div className="space-y-6 font-sans" id="stats-reports-view">
+      {/* Comprehensive Demographic & Geographic Observatory Header */}
+      <div className="bg-white rounded-3xl p-6 border border-[#E2DED0] shadow-2xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#F4F1EA] pb-3 text-right">
+          <div className="space-y-1">
+            <h3 className="font-extrabold text-[#2D3A30] text-sm flex items-center gap-2 justify-start">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse"></span>
+              المرصد الديموغرافي والمسح السكاني الشامل للقرية
+            </h3>
+            <p className="text-[11px] text-[#7A8B7E]">
+              إحصائيات حية متكاملة لربط أعداد أرباب الأسر والتابعين ديناميكياً ببيانات كشوفات داخل وخارج القرية.
+            </p>
+          </div>
+          <span className="text-[10px] bg-[#F4F1EA] text-[#3E4C41] font-black px-3 py-1 rounded-full">
+            تحديث فوري ونشط
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Card 1: Inside Village Population */}
+          <div className="bg-[#FDFBF7] rounded-2xl p-4 border border-[#E2DED0] shadow-3xs hover:shadow-2xs transition-all text-right flex flex-col justify-between space-y-3">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-[#4A5D4E]">
+                  <Activity className="w-4.5 h-4.5" />
+                </div>
+                <span className="text-[9px] bg-emerald-50 border border-emerald-100/60 text-[#4A5D4E] font-extrabold px-2 py-0.5 rounded-full">داخل القرية</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] text-[#7A8B7E] font-bold block">إجمالي السكان داخل القرية</span>
+                <span className="text-2xl font-black text-[#2D3A30]">{stats.insideTotalPopulation} <span className="text-xs font-semibold text-[#7A8B7E]">نسمة</span></span>
+                
+                <div className="text-[10px] text-emerald-800 font-extrabold bg-emerald-50/70 border border-emerald-100/50 rounded-lg px-2 py-1 flex justify-between items-center mt-1">
+                  <span>المستهدف: 1592</span>
+                  <span>{((stats.insideTotalPopulation / 1592) * 100).toFixed(1)}%</span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-1 overflow-hidden">
+                  <div 
+                    className="bg-emerald-600 h-full transition-all" 
+                    style={{ width: `${Math.min(100, (stats.insideTotalPopulation / 1592) * 100)}%` }}
+                  ></div>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-1.5 pt-1.5 border-t border-[#F4F1EA]">
+              <div className="text-[10px] text-[#7A8B7E] flex justify-between">
+                <span>أرباب الأسر: <strong className="text-[#2D3A30] font-black">{stats.insideFamiliesCount}</strong></span>
+                <span>التابعين: <strong className="text-[#2D3A30] font-black">{stats.insideDependentsCount}</strong></span>
+              </div>
+              <div className="text-[8.5px] text-gray-500 font-bold bg-gray-50/80 p-1 rounded border border-gray-100 text-center">
+                المعادلة: {stats.insideFamiliesCount} رب + {stats.insideDependentsCount} تابع = {stats.insideTotalPopulation}
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Outside Village Population */}
+          <div className="bg-[#FDFBF7] rounded-2xl p-4 border border-[#E2DED0] shadow-3xs hover:shadow-2xs transition-all text-right flex flex-col justify-between space-y-3">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-700">
+                  <TrendingUp className="w-4.5 h-4.5" />
+                </div>
+                <span className="text-[9px] bg-amber-50 border border-amber-100/60 text-amber-800 font-extrabold px-2 py-0.5 rounded-full">خارج القرية</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] text-[#7A8B7E] font-bold block">إجمالي السكان خارج القرية</span>
+                <span className="text-2xl font-black text-[#2D3A30]">{stats.outsideTotalPopulation} <span className="text-xs font-semibold text-[#7A8B7E]">نسمة</span></span>
+                
+                <div className="text-[10px] text-amber-900 font-extrabold bg-amber-50/70 border border-amber-100/50 rounded-lg px-2 py-1 flex justify-between items-center mt-1">
+                  <span>المستهدف: 997</span>
+                  <span>{((stats.outsideTotalPopulation / 997) * 100).toFixed(1)}%</span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-1 overflow-hidden">
+                  <div 
+                    className="bg-amber-600 h-full transition-all" 
+                    style={{ width: `${Math.min(100, (stats.outsideTotalPopulation / 997) * 100)}%` }}
+                  ></div>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-1.5 pt-1.5 border-t border-[#F4F1EA]">
+              <div className="text-[10px] text-[#7A8B7E] flex justify-between">
+                <span>أرباب الأسر: <strong className="text-[#2D3A30] font-black">{stats.outsideFamiliesCount}</strong></span>
+                <span>التابعين: <strong className="text-[#2D3A30] font-black">{stats.outsideDependentsCount}</strong></span>
+              </div>
+              <div className="text-[8.5px] text-gray-500 font-bold bg-gray-50/80 p-1 rounded border border-gray-100 text-center">
+                المعادلة: {stats.outsideFamiliesCount} رب + {stats.outsideDependentsCount} تابع = {stats.outsideTotalPopulation}
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: Gender Counts */}
+          <div className="bg-[#FDFBF7] rounded-2xl p-4 border border-[#E2DED0] shadow-3xs hover:shadow-2xs transition-all text-right flex flex-col justify-between space-y-3">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-700">
+                  <Users className="w-4.5 h-4.5" />
+                </div>
+                <span className="text-[9px] bg-blue-50 border border-blue-100/60 text-blue-800 font-extrabold px-2 py-0.5 rounded-full">التوزيع حسب الجنس</span>
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-[10px] text-[#7A8B7E] font-bold block">النوع الاجتماعي الفعلي للتعداد</span>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-extrabold text-[#2D3A30] flex items-center gap-1">👨 الذكور: <span className="font-black">{stats.maleCount}</span></span>
+                  <span className="font-extrabold text-[#2D3A30] flex items-center gap-1">👩 الإناث: <span className="font-black">{stats.femaleCount}</span></span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-1.5 flex overflow-hidden">
+                  <div 
+                    className="bg-[#4A5D4E] h-full transition-all" 
+                    style={{ width: `${stats.totalPopulation > 0 ? (stats.maleCount / stats.totalPopulation) * 100 : 50}%` }}
+                  ></div>
+                  <div 
+                    className="bg-pink-400 h-full transition-all" 
+                    style={{ width: `${stats.totalPopulation > 0 ? (stats.femaleCount / stats.totalPopulation) * 100 : 50}%` }}
+                  ></div>
+                </div>
+              </div>
+            </div>
+            <div className="pt-2 border-t border-[#F4F1EA] text-[9px] text-[#7A8B7E] text-center font-bold">
+              فرز الجنسين: {(stats.totalPopulation > 0 ? (stats.maleCount / stats.totalPopulation) * 100 : 50).toFixed(1)}% ذكور مقابل {(stats.totalPopulation > 0 ? (stats.femaleCount / stats.totalPopulation) * 100 : 50).toFixed(1)}% إناث
+            </div>
+          </div>
+
+          {/* Card 4: Total Population */}
+          <div className="bg-[#4A5D4E] rounded-2xl p-5 border border-[#4A5D4E] shadow-3xs hover:shadow-2xs transition-all text-right space-y-3 text-[#FDFBF7]">
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-amber-300">
+                <Users className="w-5 h-5" />
+              </div>
+              <span className="text-[9px] bg-white/10 text-amber-300 font-extrabold px-2 py-0.5 rounded-full">المجموع العام</span>
+            </div>
+            <div className="space-y-0.5">
+              <span className="text-[10px] text-[#FDFBF7]/80 font-semibold block">التعداد العام الموحد للقرية</span>
+              <span className="text-2xl font-black">{stats.totalPopulation} <span className="text-xs font-semibold">نسمة</span></span>
+            </div>
+            <p className="text-[9px] text-[#FDFBF7]/70 border-t border-white/10 pt-2 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+              إجمالي أرباب الأسر والتابعين بكافة الكشوفات
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Educational & Social Indexes Indicators */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Card 1 */}

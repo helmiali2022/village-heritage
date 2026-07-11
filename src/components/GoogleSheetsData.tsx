@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Database, RefreshCw, AlertTriangle, HelpCircle, CheckCircle2, FileSpreadsheet, Search, ListFilter, Users, Phone, MapPin, Shield, Upload, Link, ArrowUpDown, Filter, ChevronUp, ChevronDown, Calendar } from 'lucide-react';
+import { Database, RefreshCw, AlertTriangle, HelpCircle, CheckCircle2, FileSpreadsheet, Search, ListFilter, Users, Phone, MapPin, Shield, Upload, Link, ArrowUpDown, Filter, ChevronUp, ChevronDown, Calendar, Lock, LogOut, PlusCircle, Check, Sparkles } from 'lucide-react';
 import { Family } from '../types';
+import { initAuth, googleSignIn, googleSignOut, getAccessToken } from '../lib/googleSheetsAuth';
+import { User } from 'firebase/auth';
 
 interface GoogleSheetsDataProps {
   isAdmin?: boolean;
@@ -428,6 +430,16 @@ export default function GoogleSheetsData({
   const [isBackupUsed, setIsBackupUsed] = useState(false);
   const [googleSheetsUrl, setGoogleSheetsUrl] = useState('https://docs.google.com/spreadsheets/d/e/2PACX-1vRtQlsnxA_BqxXqesgnS6YHaDEYE_PzGurtPM_zOeDVKFBVhYMPtRyXWIHduGDxYKqLppy4NqmiMSfA/pub?output=csv');
   const [syncSuccess, setSyncSuccess] = useState(false);
+
+  // Direct Google Sheets API OAuth states
+  const [googleUser, setGoogleUser] = useState<User | null>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [needsGoogleAuth, setNeedsGoogleAuth] = useState(true);
+  const [targetSpreadsheetId, setTargetSpreadsheetId] = useState('');
+  const [tabName, setTabName] = useState('Sheet1');
+  const [isExporting, setIsExporting] = useState(false);
+  const [isCreatingSheet, setIsCreatingSheet] = useState(false);
+  const [newSheetUrl, setNewSheetUrl] = useState<string | null>(null);
   
   // Design Unification States matching FamilyRegister
   const [searchQuery, setSearchQuery] = useState('');
@@ -450,6 +462,372 @@ export default function GoogleSheetsData({
   };
 
   const defaultEmbeddedUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRtQlsnxA_BqxXqesgnS6YHaDEYE_PzGurtPM_zOeDVKFBVhYMPtRyXWIHduGDxYKqLppy4NqmiMSfA/pub?output=csv';
+
+  const extractSpreadsheetId = (urlOrId: string): string => {
+    const trimmed = urlOrId.trim();
+    const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (match && match[1]) {
+      return match[1];
+    }
+    return trimmed;
+  };
+
+  // Listen to Firebase auth state changes
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setGoogleUser(user);
+        setGoogleToken(token);
+        setNeedsGoogleAuth(false);
+        // Automatically extract ID from backend-configured sheets URL
+        fetch('/api/google-sheets-url')
+          .then(res => res.ok ? res.json() : null)
+          .then(config => {
+            if (config && config.googleSheetsUrl) {
+              const sId = extractSpreadsheetId(config.googleSheetsUrl);
+              if (sId) setTargetSpreadsheetId(sId);
+            }
+          })
+          .catch(() => {});
+      },
+      () => {
+        setGoogleUser(null);
+        setGoogleToken(null);
+        setNeedsGoogleAuth(true);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await googleSignIn();
+      if (res) {
+        setGoogleUser(res.user);
+        setGoogleToken(res.accessToken);
+        setNeedsGoogleAuth(false);
+        alert('تم تسجيل الدخول وتفويض حساب Google بنجاح لمزامنة الجداول!');
+      }
+    } catch (err: any) {
+      console.error('Google authorization failed:', err);
+      setError(`فشل الاتصال بـ Google: ${err.message || 'يرجى المحاولة مجدداً'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    try {
+      await googleSignOut();
+      setGoogleUser(null);
+      setGoogleToken(null);
+      setNeedsGoogleAuth(true);
+      alert('تم قطع الاتصال بـ Google Sheets بنجاح.');
+    } catch (err: any) {
+      console.error('Logout error:', err);
+    }
+  };
+
+  // Direct Google Sheets API fetch
+  const importFromGoogleSheet = async () => {
+    if (!googleToken) {
+      setError('يرجى تسجيل الدخول باستخدام Google أولاً للتكامل السحابي.');
+      return;
+    }
+    const sId = extractSpreadsheetId(targetSpreadsheetId);
+    if (!sId) {
+      setError('يرجى إدخال رابط أو معرف صالح لجدول بيانات Google Sheets الخاص بك.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sId}/values/${tabName}`,
+        {
+          headers: { Authorization: `Bearer ${googleToken}` }
+        }
+      );
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `استجابة خاطئة من السيرفر: ${response.status}`);
+      }
+
+      const resData = await response.json();
+      const values: string[][] = resData.values;
+
+      if (!values || values.length < 2) {
+        throw new Error('الجدول المستورد فارغ أو لا يحتوي على صفوف بيانات صالحة للتعداد.');
+      }
+
+      // Parse values
+      const headerRow = values[0].map(h => String(h || '').trim());
+      const rawDataRows = values.slice(1).filter(row => row.length > 0);
+
+      let breadwinnerIdx = headerRow.findIndex(h => h.includes('رب الأسرة') || h.includes('العائل') || h.includes('الاسم الكامل') || h.includes('الاسم'));
+      let neighborhoodIdx = headerRow.findIndex(h => h.includes('المحلة') || h.includes('المنطقة') || h.includes('محلة'));
+      let countIdx = headerRow.findIndex(h => h.includes('عدد الأفراد') || h.includes('العدد') || h.includes('أفراد') || h.includes('الأفراد'));
+      let phoneIdx = headerRow.findIndex(h => h.includes('الجوال') || h.includes('الهاتف') || h.includes('تلفون') || h.includes('اتصال') || h.includes('موبايل'));
+      let residenceIdx = headerRow.findIndex(h => h.includes('الإقامة') || h.includes('السكن') || h.includes('حالة الإقامة') || h.includes('نوع الإقامة'));
+      let familyNameIdx = headerRow.findIndex(h => h.includes('اللقب') || h.includes('العائلة') || h.includes('اسم العائلة'));
+
+      if (breadwinnerIdx === -1) breadwinnerIdx = 1;
+      if (neighborhoodIdx === -1) neighborhoodIdx = 2;
+      if (countIdx === -1) countIdx = 3;
+      if (phoneIdx === -1) phoneIdx = 4;
+      if (residenceIdx === -1) residenceIdx = 6;
+      if (familyNameIdx === -1) familyNameIdx = 7;
+
+      const parsedRows = rawDataRows.map((row, idx) => ({
+        "م": row[0] || String(idx + 1),
+        head: row[breadwinnerIdx] || '',
+        dist: row[neighborhoodIdx] || '',
+        count: row[countIdx] || '1',
+        phone: row[phoneIdx] || '',
+        res: row[residenceIdx] || 'دائمة',
+        family: row[familyNameIdx] || 'غير محدد',
+        notes: row[5] || ''
+      }));
+
+      setData(parsedRows);
+
+      // Map rows to formal Family objects
+      const mappedFamilies = rawDataRows.map((row, idx) => {
+        const id = `imported_oauth_${row[0] || idx + 1}_${Date.now()}`;
+        const breadwinnerName = row[breadwinnerIdx] || 'مواطن مجهول';
+        const neighborhood = row[neighborhoodIdx] || 'غير محدد';
+        const count = parseInt(row[countIdx], 10) || 1;
+        const phone = row[phoneIdx] || '';
+        const resVal = row[residenceIdx] || 'دائمة';
+        const familyName = row[familyNameIdx] || 'غير محدد';
+
+        let housingType: 'ملك' | 'إيجار' | 'شعبي' | 'أخرى' = 'ملك';
+        if (resVal.includes('إيجار') || resVal.includes('مؤقت')) {
+          housingType = 'إيجار';
+        } else if (resVal.includes('شعبي')) {
+          housingType = 'شعبي';
+        } else if (resVal.includes('أخرى')) {
+          housingType = 'أخرى';
+        }
+
+        const members = Array.from({ length: count }).map((_, mIdx) => ({
+          id: `${id}_m_${mIdx + 1}`,
+          name: mIdx === 0 ? breadwinnerName : `${breadwinnerName} (فرد أسرة ${mIdx + 1})`,
+          relationship: mIdx === 0 ? 'عائل' as const : 'ابن' as const,
+          gender: 'ذكر' as const,
+          age: mIdx === 0 ? 45 : 12,
+          education: 'ثانوي' as const,
+          occupation: mIdx === 0 ? 'أعمال حرة' : 'طالب',
+          healthStatus: 'سليم' as const,
+        }));
+
+        const latitude = Math.floor(Math.random() * 60) + 20;
+        const longitude = Math.floor(Math.random() * 60) + 20;
+
+        return {
+          id,
+          familyName,
+          breadwinnerName,
+          phone,
+          neighborhood,
+          address: `المحلة: ${neighborhood}`,
+          housingType,
+          residence: resVal,
+          monthlyIncome: 'أقل من 3000 ريال' as const,
+          supportStatus: 'مستحق للدعم' as const,
+          members,
+          registeredAt: new Date().toISOString().split('T')[0],
+          latitude,
+          longitude,
+          notes: row[5] || 'تمت المزامنة السحابية'
+        };
+      });
+
+      if (mappedFamilies.length > 0 && setFamilies) {
+        setFamilies(mappedFamilies);
+        await fetch('/api/families', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ families: mappedFamilies })
+        });
+        localStorage.setItem('local_families_v1', JSON.stringify(mappedFamilies));
+      }
+
+      setSyncSuccess(true);
+      setTimeout(() => setSyncSuccess(false), 4000);
+      alert('تم استيراد ومزامنة التعداد السحابي وتحديث قاعدة البيانات بنجاح!');
+    } catch (err: any) {
+      console.error('OAuth direct fetch error:', err);
+      setError(`فشل استيراد البيانات: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Direct Google Sheets API export
+  const exportToGoogleSheet = async () => {
+    if (!googleToken) {
+      setError('يرجى تسجيل الدخول باستخدام Google أولاً للتصدير السحابي.');
+      return;
+    }
+    const sId = extractSpreadsheetId(targetSpreadsheetId);
+    if (!sId) {
+      setError('يرجى إدخال رابط أو معرف صالح لجدول بيانات Google Sheets.');
+      return;
+    }
+
+    if (!families || families.length === 0) {
+      setError('لا توجد بيانات عائلات محلية لتصديرها حالياً.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `⚠️ تحذير: هل أنت متأكد من رغبتك في تحديث وتصدير بيانات التعداد الحالية (عدد الأسر: ${families.length}) إلى جدول بيانات Google Sheets السحابي؟ سيقوم هذا الإجراء بالكتابة فوق البيانات في ورقة العمل: "${tabName}".`
+    );
+    if (!confirmed) return;
+
+    setIsExporting(true);
+    setError(null);
+
+    try {
+      const values = [
+        ["م", "رب الأسرة", "المحلة", "عدد الأفراد", "رقم الجوال", "الملاحظات", "الإقامة", "اللقب"],
+        ...families.map((f, idx) => [
+          String(idx + 1),
+          f.breadwinnerName,
+          f.neighborhood,
+          String(f.members?.length || 1),
+          f.phone,
+          f.notes || "",
+          f.residence || "دائمة",
+          f.familyName
+        ])
+      ];
+
+      const response = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sId}/values/${tabName}!A1:H${values.length}?valueInputOption=USER_ENTERED`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${googleToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ values })
+        }
+      );
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `فشل تصدير البيانات إلى السيرفر السحابي: ${response.status}`);
+      }
+
+      setSyncSuccess(true);
+      setTimeout(() => setSyncSuccess(false), 4000);
+      alert('🎉 تم تصدير وتحديث التعداد السكاني بنجاح إلى جدول Google Sheets السحابي!');
+    } catch (err: any) {
+      console.error('Sheets direct export error:', err);
+      setError(`فشل تصدير البيانات: ${err.message}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Create brand new Google Sheet in Drive
+  const createNewGoogleSheet = async () => {
+    if (!googleToken) {
+      setError('يرجى تسجيل الدخول باستخدام Google أولاً لتوليد جدول سحابي.');
+      return;
+    }
+
+    const confirmed = window.confirm('هل تريد إنشاء جدول بيانات Google Sheets جديد مهيأ بالكامل في حسابك لتعداد سكان قرية ذي الجمال قدس؟');
+    if (!confirmed) return;
+
+    setIsCreatingSheet(true);
+    setError(null);
+    setNewSheetUrl(null);
+
+    try {
+      const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${googleToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          properties: {
+            title: `تعداد سكان قرية ذي الجمال قدس - ${new Date().toLocaleDateString('ar-SA')}`
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `فشل إنشاء الملف: ${response.status}`);
+      }
+
+      const sheet = await response.json();
+      const newSpreadsheetId = sheet.spreadsheetId;
+      const newUrl = sheet.spreadsheetUrl;
+
+      // Populate sheet with current database
+      const values = [
+        ["م", "رب الأسرة", "المحلة", "عدد الأفراد", "رقم الجوال", "الملاحظات", "الإقامة", "اللقب"],
+        ...(families && families.length > 0 
+          ? families.map((f, idx) => [
+              String(idx + 1),
+              f.breadwinnerName,
+              f.neighborhood,
+              String(f.members?.length || 1),
+              f.phone,
+              f.notes || "",
+              f.residence || "دائمة",
+              f.familyName
+            ])
+          : [
+              ["1", "ابراهيم محمود درهم", "الاكمة", "6", "774726535", "تم التعبئة كعينة أولى", "دائمة", "الغرافي"]
+            ]
+        )
+      ];
+
+      const updateResponse = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${newSpreadsheetId}/values/Sheet1!A1:H${values.length}?valueInputOption=USER_ENTERED`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${googleToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ values })
+        }
+      );
+
+      if (!updateResponse.ok) {
+        throw new Error('فشل تهيئة بيانات الجدول بعد إنشائه.');
+      }
+
+      setTargetSpreadsheetId(newSpreadsheetId);
+      setTabName('Sheet1');
+      setNewSheetUrl(newUrl);
+
+      // Save to server
+      await fetch('/api/google-sheets-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: newUrl })
+      });
+
+      alert('🎉 تم إنشاء جدول بيانات جوجل جديد بنجاح وتهيئته بتعداد القرية الحالي!');
+    } catch (err: any) {
+      console.error('Spreadsheet generation error:', err);
+      setError(`فشل توليد جدول جديد: ${err.message}`);
+    } finally {
+      setIsCreatingSheet(false);
+    }
+  };
 
   // Custom client-side CSV parser that handles double quotes, commas, and newlines
   const parseCSV = (csvText: string): any[] => {
@@ -852,54 +1230,169 @@ export default function GoogleSheetsData({
   return (
     <div className="space-y-5 font-sans relative">
       {syncSuccess && (
-        <div className="fixed top-5 left-5 z-50 bg-[#4A5D4E] text-[#FDFBF7] px-5 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 animate-bounce border border-emerald-500 max-w-sm">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 animate-pulse" />
+        <div className="fixed top-5 left-5 z-50 bg-blue-600 text-white px-5 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 animate-bounce border border-blue-400 max-w-sm">
+          <CheckCircle2 className="w-5 h-5 text-sky-200 shrink-0 animate-pulse" />
           <div className="text-right">
-            <p className="text-xs font-bold">تمت المزامنة بنجاح!</p>
-            <p className="text-[10px] text-gray-200">تم جلب وتحديث جدول جوجل شيت المدمج وسجل المواطنين بنجاح.</p>
+            <p className="text-xs font-bold text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.5)]">تمت المزامنة بنجاح!</p>
+            <p className="text-[10px] text-sky-100">تم جلب وتحديث جدول جوجل شيت السحابي وسجل العائلات بنجاح.</p>
           </div>
         </div>
       )}
 
-      {/* Intro Header matching FamilyRegister style exactly */}
-      <div className="bg-gradient-to-l from-[#3E4C41] to-[#4A5D4E] text-[#FDFBF7] rounded-3xl p-6 border border-[#2D3A30] shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div className="space-y-1">
-          <h2 className="text-base sm:text-lg font-extrabold flex items-center gap-2">
-            <FileSpreadsheet className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
-            التكامل المباشر مع جداول بيانات Google Sheets
-          </h2>
-          <p className="text-xs text-[#E2DED0] max-w-2xl leading-relaxed">
-            مزامنة حية لبيانات التعداد ومسوح العائلات من جداول البيانات السحابية مباشرة. يتم تحديث الجدول أدناه تلقائياً عند تغيير ملف الـ Google Sheets.
-          </p>
+      {/* Royal Blue Google integration Hub */}
+      <div className="bg-gradient-to-l from-blue-700 to-blue-800 text-white rounded-3xl p-6 border border-blue-900 shadow-md">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+          <div className="space-y-1">
+            <h2 className="text-lg sm:text-xl font-extrabold flex items-center gap-2">
+              <FileSpreadsheet className="w-6 h-6 text-sky-300 animate-pulse" />
+              التكامل السحابي المباشر والأمن مع Google Sheets
+            </h2>
+            <p className="text-xs text-sky-100 max-w-3xl leading-relaxed">
+              تحكم بجدول التعداد وحساب عائلات قرية ذي الجمال قدس مباشرة عبر حساب جوجل الخاص بك. 
+              لا تحتاج لجعل جدول البيانات الخاص بك علنياً (Public) بعد الآن، فقط سجل الدخول بأمان واقرأ واكتب مباشرة بلمسة زر.
+            </p>
+          </div>
+
+          {/* Connection Profile Status */}
+          <div className="w-full lg:w-auto shrink-0">
+            {needsGoogleAuth ? (
+              <button
+                onClick={handleGoogleLogin}
+                className="w-full lg:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-2.5 shadow-lg border border-blue-500 hover:scale-[1.02] cursor-pointer"
+              >
+                <Lock className="w-4 h-4 text-sky-200" />
+                <span className="drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] text-sky-50">ربط وتفويض حساب Google</span>
+              </button>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="bg-blue-900/60 border border-blue-500/30 rounded-2xl px-4 py-2 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-500/40 text-blue-100 text-xs font-black flex items-center justify-center border border-blue-300/30">
+                    {googleUser?.displayName?.slice(0, 2) || 'G'}
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-black text-sky-100">{googleUser?.displayName}</p>
+                    <p className="text-[10px] text-blue-200">{googleUser?.email}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleGoogleLogout}
+                  className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/40 text-red-100 px-4 py-3 rounded-2xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>قطع الاتصال</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-        <button
-          onClick={fetchSpreadsheetData}
-          disabled={loading}
-          className="w-full md:w-auto bg-[#E9F0E0] hover:bg-[#DDE5B6] text-[#4A5D4E] px-5 py-2.5 rounded-xl text-xs font-black border border-[#DDE5B6] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:scale-[1.02] duration-150 disabled:opacity-75"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          {loading ? 'جاري التحديث الحقيقي...' : '🔄 تحديث البيانات الحية'}
-        </button>
+
+        {/* OAuth Integration Control Center */}
+        {!needsGoogleAuth && (
+          <div className="mt-6 pt-6 border-t border-blue-600/40 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Input Config fields */}
+            <div className="lg:col-span-5 space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-sky-100 mb-1.5 text-right">
+                  رابط جدول بيانات Google Sheets أو المعرف (Spreadsheet ID):
+                </label>
+                <div className="relative">
+                  <Link className="absolute right-3 top-3.5 text-blue-300 w-4 h-4" />
+                  <input
+                    type="text"
+                    value={targetSpreadsheetId}
+                    onChange={(e) => setTargetSpreadsheetId(e.target.value)}
+                    placeholder="الصق رابط جدول جوجل شيت أو معرفه هنا..."
+                    className="w-full bg-blue-900/40 border border-blue-500/40 rounded-xl pr-10 pl-4 py-3 text-xs text-white focus:outline-none focus:border-sky-300 focus:ring-1 focus:ring-sky-300 text-right font-mono"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-sky-100 mb-1.5 text-right">
+                    اسم ورقة العمل (Tab):
+                  </label>
+                  <input
+                    type="text"
+                    value={tabName}
+                    onChange={(e) => setTabName(e.target.value)}
+                    placeholder="مثال: Sheet1"
+                    className="w-full bg-blue-900/40 border border-blue-500/40 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-sky-300 text-center font-mono"
+                  />
+                </div>
+                <div className="flex flex-col justify-end">
+                  <button
+                    onClick={createNewGoogleSheet}
+                    disabled={isCreatingSheet}
+                    className="w-full bg-sky-500 hover:bg-sky-600 disabled:bg-blue-900/40 text-blue-950 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer shadow-md disabled:text-sky-300/40"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    {isCreatingSheet ? 'جاري الإنشاء...' : 'جدول جديد 📄'}
+                  </button>
+                </div>
+              </div>
+              {newSheetUrl && (
+                <a
+                  href={newSheetUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block text-center text-xs text-yellow-300 hover:underline font-bold bg-yellow-400/10 border border-yellow-400/30 p-2.5 rounded-xl"
+                >
+                  📂 فتح ملف الـ Google Sheets الذي تم إنشاؤه حديثاً في نافذة جديدة
+                </a>
+              )}
+            </div>
+
+            {/* Actions & Buttons Panel */}
+            <div className="lg:col-span-7 h-full flex flex-col justify-between gap-4">
+              <p className="text-[11px] text-sky-200 text-right leading-relaxed">
+                💡 **دليل سريع**: يمكنك استخدام ميزة الاستيراد السحابي لقراءة جدول جوجل شيت، أو استخدام التصدير السحابي لحفظ كافة بيانات التعداد المحلية وتصديرها بلمح البصر إلى جدول بيانات جوجل النشط بحسابك لتعديله ومشاركته كملف إكسل سحابي.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                <button
+                  onClick={importFromGoogleSheet}
+                  disabled={loading}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-3.5 rounded-2xl text-xs font-black transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer shadow-lg hover:scale-[1.01] border border-emerald-400 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  {loading ? 'جاري الاستيراد...' : '📥 جلب وتحديث من السحابة'}
+                </button>
+                <button
+                  onClick={exportToGoogleSheet}
+                  disabled={isExporting}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white px-5 py-3.5 rounded-2xl text-xs font-black transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer shadow-lg hover:scale-[1.01] border border-blue-500 disabled:opacity-50"
+                >
+                  {isExporting ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Upload className="w-4 h-4 text-sky-100" />
+                  )}
+                  <span className="drop-shadow-[0_0_6px_rgba(255,255,255,0.4)]">📤 تصدير وتحديث السحابة</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Admin/User Privilege Banner matching FamilyRegister style exactly */}
-      <div className="bg-[#FDFBF7] border border-[#E2DED0] p-4 rounded-3xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      {/* Fallback & Config Information Bar */}
+      <div className="bg-slate-50 border border-slate-200 p-4 rounded-3xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
         <div className="space-y-1">
-          <h4 className="text-xs font-extrabold text-[#2D3A30] flex items-center gap-1.5">
-            <Shield className="w-4 h-4 text-[#7A8B7E]" />
-            جدول بيانات Google Sheets المدمج (عرض ومزامنة مباشرة)
+          <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+            <Shield className="w-4 h-4 text-blue-600" />
+            وضعية الربط والمزامنة السحابية (Google Sheets Engine)
           </h4>
-          <p className="text-[10px] text-[#7A8B7E]">
-            {isBackupUsed 
-              ? 'يتم عرض البيانات المحلية الاحتياطية حالياً نظراً لتعذر الوصول للرابط المباشر.' 
-              : 'الربط السحابي ومزامنة البيانات مع جداول بيانات جوجل مشغلة ونشطة بالكامل حياً.'}
+          <p className="text-[10px] text-slate-500">
+            {needsGoogleAuth 
+              ? 'أنت تعمل حالياً في وضعية "المزامنة التجريبية" (جدول مؤقت محلي). يرجى ربط حساب جوجل للتحكم الكامل.'
+              : 'تم تفعيل الاتصال والتزامن السحابي الحقيقي الثنائي لبيانات عائلات ذي الجمال قدس.'}
           </p>
         </div>
-        <div className="flex items-center gap-2 bg-[#E9F0E0] border border-[#DDE5B6] px-3 py-1.5 rounded-xl text-[11px] font-bold text-[#4A5D4E]">
-          <span className={`w-2 h-2 rounded-full ${isBackupUsed ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
-          <span>{isBackupUsed ? 'وضع النسخ الاحتياطي النشط' : 'مزامنة حية مباشرة ونشطة'}</span>
+        <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-xl text-[11px] font-bold text-blue-700">
+          <span className={`w-2 h-2 rounded-full ${needsGoogleAuth ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
+          <span>{needsGoogleAuth ? 'المزامنة التجريبية الاحتياطية' : 'ربط سحابي نشط وآمن'}</span>
         </div>
       </div>
+
 
       {/* Controls Card matching FamilyRegister style exactly */}
       <div className="bg-[#F4F1EA] rounded-3xl p-6 border border-[#E2DED0] shadow-sm space-y-4">

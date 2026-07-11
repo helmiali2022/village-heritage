@@ -16,6 +16,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "firebase": "^12.16.0",
     "google-auth-library": "^10.9.0",
     "googleapis": "^173.0.0",
     "lucide-react": "^0.546.0",
@@ -33,7 +34,6 @@
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "typescript": "~5.8.2"
   }
 }

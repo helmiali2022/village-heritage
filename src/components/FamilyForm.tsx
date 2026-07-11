@@ -45,6 +45,7 @@ export default function FamilyForm({
   const [mRelationship, setMRelationship] = useState<RelationshipType>('ابن');
   const [mGender, setMGender] = useState<GenderType>('ذكر');
   const [mBirthDate, setMBirthDate] = useState('');
+  const [mNationalId, setMNationalId] = useState('');
   const [mNeighborhood, setMNeighborhood] = useState('');
   const [mResidence, setMResidence] = useState('');
   const [mPhone, setMPhone] = useState('');
@@ -163,6 +164,11 @@ export default function FamilyForm({
       return;
     }
 
+    if (mName.trim().includes(' ') || mName.trim().split(/\s+/).length > 1) {
+      alert('خطأ: اسم الفرد يجب أن يتكون من اسم واحد فقط بدون مسافات أو فراغات!');
+      return;
+    }
+
     const selectedFamilyObj = families.find(f => f.id === mFamilyId);
     if (!selectedFamilyObj) {
       alert('الرجاء اختيار رب الأسرة المرتبط');
@@ -176,14 +182,7 @@ export default function FamilyForm({
     const colC = selectedFamilyObj.neighborhood;
 
     // Standardize relationship text
-    let relText = 'آخر';
-    if (mRelationship === 'ابن' || mRelationship === 'زوج') {
-      relText = 'ابن/زوج';
-    } else if (mRelationship === 'ابنة' || mRelationship === 'زوجة') {
-      relText = 'ابنة/زوجة';
-    } else {
-      relText = 'أخرى';
-    }
+    const relText = mRelationship;
 
     const colD = `${relText} لـ ${cleanBwrName}`;
     const colE = mPhone.trim();
@@ -262,6 +261,11 @@ export default function FamilyForm({
     e.preventDefault();
     if (!mName) return;
 
+    if (mName.trim().includes(' ') || mName.trim().split(/\s+/).length > 1) {
+      alert('خطأ: اسم التابع يجب أن يكون اسم واحد فقط بدون مسافات أو فراغات!');
+      return;
+    }
+
     let calculatedAge = 0;
     if (mBirthDate) {
       const birthYear = new Date(mBirthDate).getFullYear();
@@ -288,6 +292,7 @@ export default function FamilyForm({
               gender: mGender,
               age: calculatedAge,
               birthDate: mBirthDate || undefined,
+              nationalId: mNationalId || undefined,
               neighborhood: targetNeighborhood,
               residence: targetResidence,
               phone: mPhone || undefined,
@@ -308,6 +313,7 @@ export default function FamilyForm({
           gender: mGender,
           age: calculatedAge,
           birthDate: mBirthDate || undefined,
+          nationalId: mNationalId || undefined,
           neighborhood: targetNeighborhood,
           residence: targetResidence,
           phone: mPhone || undefined,
@@ -332,6 +338,7 @@ export default function FamilyForm({
           gender: mGender,
           age: calculatedAge,
           birthDate: mBirthDate || undefined,
+          nationalId: mNationalId || undefined,
           neighborhood: targetNeighborhood,
           residence: targetResidence,
           phone: mPhone || undefined,
@@ -394,6 +401,7 @@ export default function FamilyForm({
 
     // Reset member inputs
     setMName('');
+    setMNationalId('');
     setMBirthDate('');
     setMNeighborhood('');
     setMResidence('');
@@ -425,6 +433,7 @@ export default function FamilyForm({
     }
 
     setMName(firstName);
+    setMNationalId(m.nationalId || '');
     setMRelationship(m.relationship);
     setMGender(m.gender);
     setMBirthDate(m.birthDate || '');
@@ -440,6 +449,7 @@ export default function FamilyForm({
   const handleCancelEditMember = () => {
     setEditingMemberId(null);
     setMName('');
+    setMNationalId('');
     setMBirthDate('');
     setMNeighborhood('');
     setMResidence('');
@@ -599,9 +609,30 @@ export default function FamilyForm({
                   type="text"
                   value={mName}
                   onChange={(e) => setMName(e.target.value)}
-                  placeholder="مثال: صالح، فاطمة، يحيى"
-                  className="w-full px-3.5 py-2 rounded-xl border border-[#E2DED0] text-xs bg-[#FDFBF7] text-[#2D3A30] font-medium focus:ring-2 focus:ring-[#4A5D4E]/15 focus:bg-white outline-none transition-all"
+                  placeholder="الاسم الأول فقط للفرد"
+                  className={`w-full px-3.5 py-2 rounded-xl border text-xs font-medium outline-none transition-all ${
+                    mName.trim() && (mName.includes(' ') || mName.trim().split(/\s+/).length > 1)
+                      ? 'border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-200'
+                      : 'border-[#E2DED0] bg-[#FDFBF7] text-[#2D3A30] focus:ring-2 focus:ring-[#4A5D4E]/15 focus:bg-white'
+                  }`}
                   required
+                />
+                {mName.trim() && (mName.includes(' ') || mName.trim().split(/\s+/).length > 1) && (
+                  <p className="text-[10px] text-red-600 font-bold mt-1">
+                    ⚠️ خطأ: يجب إدخال اسم واحد فقط بدون أي مسافات!
+                  </p>
+                )}
+              </div>
+
+              {/* 1.1 الرقم الوطني */}
+              <div>
+                <label className="block text-xs text-[#3E4C41] mb-1.5 font-bold">الرقم الوطني (اختياري)</label>
+                <input
+                  type="text"
+                  value={mNationalId}
+                  onChange={(e) => setMNationalId(e.target.value)}
+                  placeholder="مثال: 123456789012"
+                  className="w-full px-3.5 py-2 rounded-xl border border-[#E2DED0] text-xs bg-[#FDFBF7] text-[#2D3A30] font-medium focus:ring-2 focus:ring-[#4A5D4E]/15 focus:bg-white outline-none transition-all"
                 />
               </div>
 
@@ -666,13 +697,15 @@ export default function FamilyForm({
               <div>
                 <label className="block text-xs text-[#3E4C41] mb-1.5 font-bold">العلاقة برب الأسرة <span className="text-red-500">*</span></label>
                 <select
-                  value={mRelationship === 'زوج' ? 'ابن' : mRelationship === 'زوجة' ? 'ابنة' : mRelationship === 'ابن' ? 'ابن' : mRelationship === 'ابنة' ? 'ابنة' : 'آخر'}
+                  value={mRelationship}
                   onChange={(e) => handleRelationshipChangeUnified(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-[#E2DED0] text-xs bg-[#FDFBF7] text-[#2D3A30] font-medium outline-none focus:ring-2 focus:ring-[#4A5D4E]/15 focus:bg-white transition-all"
                   required
                 >
-                  <option value="ابن">ابن/زوج</option>
-                  <option value="ابنة">ابنة/زوجة</option>
+                  <option value="ابن">ابن</option>
+                  <option value="ابنة">ابنة</option>
+                  <option value="زوج">زوج</option>
+                  <option value="زوجة">زوجة</option>
                   <option value="آخر">أخرى</option>
                 </select>
               </div>
@@ -1117,8 +1150,29 @@ export default function FamilyForm({
                     value={mName}
                     onChange={(e) => setMName(e.target.value)}
                     placeholder="الاسم الأول فقط للفرد"
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-[#FDFBF7] text-[#2D3A30] font-medium focus:ring-1 focus:ring-[#4A5D4E] focus:bg-white outline-none"
+                    className={`w-full px-2.5 py-1.5 rounded-lg border text-xs font-medium outline-none ${
+                      mName.trim() && (mName.includes(' ') || mName.trim().split(/\s+/).length > 1)
+                        ? 'border-red-500 bg-red-50 text-red-900 focus:ring-1 focus:ring-red-400'
+                        : 'border-[#E2DED0] bg-[#FDFBF7] text-[#2D3A30] focus:ring-1 focus:ring-[#4A5D4E] focus:bg-white'
+                    }`}
                     required
+                  />
+                  {mName.trim() && (mName.includes(' ') || mName.trim().split(/\s+/).length > 1) && (
+                    <p className="text-[10px] text-red-600 font-bold mt-1">
+                      ⚠️ خطأ: يجب إدخال اسم واحد فقط بدون مسافات!
+                    </p>
+                  )}
+                </div>
+
+                {/* 1.1 الرقم الوطني */}
+                <div>
+                  <label className="block text-[10px] text-[#7A8B7E] mb-0.5 font-bold">الرقم الوطني (اختياري)</label>
+                  <input
+                    type="text"
+                    value={mNationalId}
+                    onChange={(e) => setMNationalId(e.target.value)}
+                    placeholder="مثال: 123456789012"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2DED0] text-xs bg-[#FDFBF7] text-[#2D3A30] font-medium focus:ring-1 focus:ring-[#4A5D4E] focus:bg-white outline-none"
                   />
                 </div>
 

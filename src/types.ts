@@ -46,6 +46,7 @@ export interface Member {
   gender: GenderType;
   age: number;
   birthDate?: string;
+  nationalId?: string;
   neighborhood?: string;
   residence?: string;
   phone?: string;
@@ -59,6 +60,7 @@ export interface Family {
   id: string;
   familyName: string;
   breadwinnerName: string;
+  nationalId?: string;
   phone: string;
   neighborhood: string;
   address: string;

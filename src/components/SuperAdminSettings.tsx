@@ -125,7 +125,8 @@ export default function SuperAdminSettings({ onBackToHome, currentUserEmail }: S
     let edits = filteredLogs.filter(l => l.actionType === 'تعديل').length;
     let deletes = filteredLogs.filter(l => l.actionType === 'حذف').length;
     let logins = filteredLogs.filter(l => l.actionType === 'تسجيل دخول').length;
-    return { total, adds, edits, deletes, logins };
+    let transfers = filteredLogs.filter(l => l.actionType === 'نقل').length;
+    return { total, adds, edits, deletes, logins, transfers };
   }, [filteredLogs]);
 
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -1672,7 +1673,7 @@ export default function SuperAdminSettings({ onBackToHome, currentUserEmail }: S
             </div>
 
             {/* Quick Stats Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
               <div className="bg-[#FDFBF7] border border-[#E2DED0] p-3 rounded-2xl text-center space-y-1">
                 <div className="text-[9px] text-[#7A8B7E] font-bold">إجمالي الحركات المصفاة</div>
                 <div className="text-lg font-black text-[#2D3A30]">{logStats.total}</div>
@@ -1684,6 +1685,10 @@ export default function SuperAdminSettings({ onBackToHome, currentUserEmail }: S
               <div className="bg-amber-50/40 border border-amber-200/50 p-3 rounded-2xl text-center space-y-1">
                 <div className="text-[9px] text-amber-800 font-bold">✏️ عمليات التعديل</div>
                 <div className="text-lg font-black text-amber-700">{logStats.edits}</div>
+              </div>
+              <div className="bg-orange-50/30 border border-orange-200/40 p-3 rounded-2xl text-center space-y-1">
+                <div className="text-[9px] text-orange-800 font-bold">🔄 عمليات النقل</div>
+                <div className="text-lg font-black text-orange-800">{logStats.transfers}</div>
               </div>
               <div className="bg-red-50/30 border border-red-200/40 p-3 rounded-2xl text-center space-y-1">
                 <div className="text-[9px] text-red-800 font-bold">🗑️ عمليات الحذف</div>
@@ -1741,6 +1746,7 @@ export default function SuperAdminSettings({ onBackToHome, currentUserEmail }: S
                   <option value="all">الكل (جميع الإجراءات)</option>
                   <option value="إضافة">إضافة ➕</option>
                   <option value="تعديل">تعديل ✏️</option>
+                  <option value="نقل">نقل 🔄</option>
                   <option value="حذف">حذف 🗑️</option>
                   <option value="تسجيل دخول">تسجيل دخول 🔑</option>
                   <option value="أخرى">أخرى 📋</option>
@@ -1805,6 +1811,8 @@ export default function SuperAdminSettings({ onBackToHome, currentUserEmail }: S
                               <span className="bg-[#E9F0E0] text-[#4A5D4E] border border-[#DDE5B6] px-2 py-0.5 rounded text-[10px] font-extrabold">إضافة ➕</span>
                             ) : log.actionType === 'تعديل' ? (
                               <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-extrabold">تعديل ✏️</span>
+                            ) : log.actionType === 'نقل' ? (
+                              <span className="bg-orange-50 text-orange-800 border border-orange-200 px-2 py-0.5 rounded text-[10px] font-extrabold">نقل 🔄</span>
                             ) : log.actionType === 'حذف' ? (
                               <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded text-[10px] font-extrabold">حذف 🗑️</span>
                             ) : log.actionType === 'تسجيل دخول' ? (

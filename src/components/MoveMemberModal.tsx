@@ -160,6 +160,11 @@ export default function MoveMemberModal({ isOpen, onClose, families, onConfirmMo
       return;
     }
 
+    if (memberName.trim().includes(' ') || memberName.trim().split(/\s+/).length > 1) {
+      setErrorMsg('خطأ: اسم الفرد يجب أن يكون كلمة واحدة فقط (الاسم الأول) بدون أي مسافات أو فراغات!');
+      return;
+    }
+
     if (!transferDate) {
       setErrorMsg('تاريخ النقل / الزواج إلزامي لتوثيق السجل.');
       return;
@@ -312,20 +317,30 @@ export default function MoveMemberModal({ isOpen, onClose, families, onConfirmMo
               </div>
             )}
 
-            {/* Individual Data Fields */}
+             {/* Individual Data Fields */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-[11px] font-black text-[#3E4C41] mb-1">اسم الفرد الكامل:</label>
+                <label className="block text-[11px] font-black text-[#3E4C41] mb-1">الاسم الأول للفرد فقط:</label>
                 <div className="relative">
                   <input
                     type="text"
                     required
                     value={memberName}
                     onChange={(e) => setMemberName(e.target.value)}
-                    className="w-full pr-8 pl-3 py-1.5 text-xs font-bold bg-white rounded-xl border border-[#E2DED0] outline-none text-[#2D3A30]"
+                    className={`w-full pr-8 pl-3 py-1.5 text-xs font-bold bg-white rounded-xl border outline-none ${
+                      memberName.trim() && (memberName.includes(' ') || memberName.trim().split(/\s+/).length > 1)
+                        ? 'border-red-500 bg-red-50 text-red-900 focus:ring-1 focus:ring-red-400'
+                        : 'border-[#E2DED0] text-[#2D3A30] focus:ring-1 focus:ring-[#4A5D4E]'
+                    }`}
+                    placeholder="الاسم الأول فقط"
                   />
                   <User className="w-3.5 h-3.5 text-[#A98467] absolute right-2.5 top-1/2 -translate-y-1/2" />
                 </div>
+                {memberName.trim() && (memberName.includes(' ') || memberName.trim().split(/\s+/).length > 1) && (
+                  <p className="text-[10px] text-red-600 font-bold mt-1">
+                    ⚠️ خطأ: يجب إدخال اسم واحد فقط بدون مسافات!
+                  </p>
+                )}
               </div>
 
               <div>
